@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "trex",
+  "project_id": "9d5f40cd-b4c7-4077-a5cf-4871fa7a3e69"
+}
