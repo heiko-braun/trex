@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!ui/.env.development
 
 # Beads / Dolt files (added by bd init)
 .dolt/

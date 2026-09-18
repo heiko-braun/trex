@@ -7,9 +7,9 @@ DB_PASSWORD := trex
 DB_NAME := trex
 DATABASE_URL := postgres://$(DB_USER):$(DB_PASSWORD)@localhost:$(DB_PORT)/$(DB_NAME)?sslmode=disable
 
-KEYCLOAK_URL := https://identity-prod.orange.sixt.com/auth
+KEYCLOAK_URL := https://identity-stage.goorange.sixt.com/auth
 KEYCLOAK_REALM := SixtEmployees
-KEYCLOAK_CLIENT_ID := agent-cli
+KEYCLOAK_CLIENT_ID := managed-agents-console
 
 ## db: start a local Postgres for development/testing via podman
 db:

@@ -77,13 +77,21 @@ reference app's `router/index.ts`, trimmed to the one real route plus
 
 ## Notes
 
-Requires a new Keycloak client redirect URI to be registered for this UI's
-dev origin (e.g. `http://localhost:5173/callback`) before browser login can
-work end-to-end — a Keycloak-admin action outside this repo, confirmed with
-the user as a prerequisite before implementation starts on this spec (see
-`specs/workflow-server-auth.md`'s sibling discussion). Until that's done,
-`npm run dev` will build and run, but the login redirect will fail at
-Keycloak with a redirect_uri mismatch.
+Initially ran the dev server on Vite's default port 5173 against the real
+prod Keycloak (`identity-prod.orange.sixt.com`) with the `agent-cli` client
+— login failed with `Invalid parameter: redirect_uri`, since that client has
+no `localhost:5173/callback` redirect URI registered. Rather than get a new
+URI registered for a one-off port, switched to reuse
+`com.sixt.web.managed-agents`'s existing dev setup: port `8484` and the
+`managed-agents-console` Keycloak client, which already has
+`http://localhost:8484/callback` registered. Also switched the IdP to
+**stage** (`identity-stage.goorange.sixt.com`, not prod) to match, since
+`managed-agents-console`'s redirect-URI registration lives against stage,
+not prod — both `workflow-server` (root `Makefile`'s `KEYCLOAK_URL`/
+`KEYCLOAK_CLIENT_ID`) and the UI (`ui/vite.config.ts`'s dev port,
+`ui/.env.development`) now point at this same stage/8484/
+managed-agents-console trio for local dev. Production deployment would use
+its own dedicated Keycloak client and redirect URI, not this borrowed one.
 
 ## Implementation notes
 
