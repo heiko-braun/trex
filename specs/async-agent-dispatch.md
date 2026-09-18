@@ -1,7 +1,7 @@
 ---
 title: Async agent dispatch via a separate poll-agent-task activity
 description: invoke-agent returns as soon as an A2A task is created instead of blocking on it; a new poll-agent-task activity checks status, so no single call needs a token that outlives it
-status: proposed
+status: implemented
 author: Heiko Braun <ike.braun@googlemail.com>
 ---
 
@@ -13,11 +13,11 @@ Fix the mechanism behind trex-8hb: `Dispatcher.Dispatch` currently blocks one Te
 
 ## Acceptance Criteria
 
-- [ ] `invoke-agent`'s activity sends the A2A message and returns as soon as the control plane responds — either a completed `Message` result (still returned directly, no polling needed) or a `{agentID, taskID}` pair when the control plane returns an async `Task`. It never calls `awaitTask`/blocks on task completion itself.
-- [ ] A new `poll-agent-task` activity takes `{agentID, taskID, token}`, calls `GET /a2a/{agentID}/tasks/{id}` once, and returns `{done bool, result string, failed bool, failureReason string}` — one HTTP call, no internal loop.
-- [ ] `workflows/pod-memory-trend.workflow.yaml` is updated to call `invoke-agent`, then (when it returned a taskID rather than a direct result) loop `call: activity, name: poll-agent-task` with a `wait` between attempts until `done`, using Zigflow's own retry/wait constructs — each poll call passes the input's `callerToken` fresh, not a value threaded through from the first call.
-- [ ] Both activities are registered on the same per-agent Temporal worker/task queue (`agent-<id>`) the supervisor already starts — no new worker/task queue.
-- [ ] Existing agent-registration/worker-supervisor tests and the demo workflow's validation both stay green; a live run against a real agent shows `invoke-agent` returning in the time of one HTTP call (not minutes) and `poll-agent-task` being called repeatedly until completion.
+- [x] `invoke-agent`'s activity sends the A2A message with `configuration.returnImmediately: true` and returns as soon as the control plane responds — either a completed result (`Done: true`) or a `{TaskID}` handle. It never blocks on task completion. Verified live: 92-120ms for a prompt whose task took 100+ seconds to actually finish.
+- [x] A new `poll-agent-task` activity takes `{TaskID}`, calls `GET /a2a/{agentID}/tasks/{id}` once, and returns `{Done, Result, Failed, FailureReason}` — one HTTP call, no internal loop. Verified live: ~30-60ms per call, 20 calls to track one real task to completion.
+- [x] `workflows/pod-memory-trend.workflow.yaml` calls `invoke-agent`, then loops `call: activity, name: poll-agent-task` with an 8s `wait` between attempts until `Done`, using Zigflow's `for`/`while` constructs. Token: per the follow-up decision (see Notes), each activity fetches its own fresh token server-side via `AgentctlTokenSource` rather than one passed through workflow input.
+- [x] Both activities are registered on the same per-agent Temporal worker/task queue (`agent-<id>`) the supervisor already starts.
+- [x] Tests green (62 passing). Live run against real agents (Ops Buddy, Log Monitoring on stage) completed successfully end-to-end, `poll-agent-task` visible as its own repeated activity type in Temporal, correct final formatted output produced.
 
 ## Approach
 
@@ -46,3 +46,12 @@ Split `agents.Dispatcher` into `Dispatch` (send only, one HTTP call, returns eit
 ## Notes
 
 Directly implements the fix direction identified in trex-8hb's comment: agentctl's own `a2a send --async`/`--wait` already models this split (create-and-return vs. poll-until-done as separate concerns); this spec brings the same shape into the workflow-server's activity design.
+
+Two things discovered during implementation that shifted scope beyond the original spec:
+
+1. **`message:send` blocks server-side by default.** The A2A protocol's `configuration.returnImmediately` flag (confirmed against `agentctl`'s own SDK usage) has to be explicitly set to `true` on every `Dispatch` call — without it, the control plane holds the HTTP response open until the task finishes server-side (observed: 100+ seconds for a real prompt), which defeats the whole point of splitting dispatch from polling regardless of how short `Dispatch`'s own Go code is.
+2. **The token now flows differently than originally planned.** Mid-implementation the user asked for token lookup to move into the worker (shelling out to `agentctl whoami`, which silently refreshes the cached session, then reading its token cache) rather than the workflow passing `callerToken` as input. `InvokeAgentInput`/`PollAgentTaskInput` dropped their `Token` fields; `internal/agents.AgentctlTokenSource` (new) is called by `internal/worker`'s activities right before each A2A call. This is explicitly a placeholder for local/demo use (documented as such in the token source's own doc comment) — it requires whoever runs the workflow-server to have their own `agentctl login` session on that machine.
+
+Also surfaced and fixed along the way: `internal/agents/dispatch.go`'s A2A response parsing was wrong from the very first version of this code (assumed a `{"kind": "message"|"task", ...}` shape; the real control plane always returns `{"task": {...}}` with result text under `artifacts[0].parts`, states like `TASK_STATE_COMPLETED`) — confirmed and fixed against the live stage control plane, with tests updated to the real fixture shapes.
+
+See `docs/zigflow-syntax-reference.md` for the Zigflow `for`-loop/data-flow rules this workflow's fix depended on (`export.as` merge semantics, why a `for` loop needs both an inner and outer `export.as`, `$output` vs `$data` vs `$context`).

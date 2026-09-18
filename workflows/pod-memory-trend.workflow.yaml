@@ -18,6 +18,14 @@ document:
     internal/agents.AgentctlTokenSource) instead of one being passed in
     as workflow input, so no token needs to outlive any single call. See
     specs/async-agent-dispatch.md.
+    Data flow follows Zigflow's documented model — see
+    docs/zigflow-syntax-reference.md for the full rules; in short: every
+    export.as merges via `$context + {...}` rather than replacing it, and
+    each `for` loop needs both a nested export.as inside `do:` (feeds
+    `while` between iterations) and its OWN export.as on the `for` task
+    itself reading `.[-1].<field>` (the only way to surface the loop's
+    final result to sibling tasks after it exits). Verified end-to-end
+    against real agents on stage.
 
 input:
   schema:
@@ -47,10 +55,7 @@ do:
           scheduleToCloseTimeout:
             minutes: 3
       export:
-        as:
-          opsBuddyDone: ${ $data.askOpsBuddy.Done }
-          opsBuddyResult: ${ $data.askOpsBuddy.Result }
-          opsBuddyTaskID: ${ $data.askOpsBuddy.TaskID }
+        as: '${ $context + { opsBuddyDone: .Done, opsBuddyResult: .Result, opsBuddyTaskID: .TaskID } }'
 
   - pollOpsBuddy:
       for:
@@ -58,6 +63,8 @@ do:
         in: ${ 60 }
         at: index
       while: ${ ($context.opsBuddyDone // false) == false and $data.index < 59 }
+      export:
+        as: '${ $context + { opsBuddyDone: (.[-1].Done // $context.opsBuddyDone), opsBuddyFailed: (.[-1].Failed // false), opsBuddyResult: (.[-1].Result // $context.opsBuddyResult) } }'
       do:
         - cooldown:
             wait:
@@ -74,11 +81,7 @@ do:
                 startToCloseTimeout:
                   seconds: 15
             export:
-              as:
-                opsBuddyTaskID: ${ $context.opsBuddyTaskID }
-                opsBuddyDone: ${ $data.pollOpsBuddyTask.Done }
-                opsBuddyFailed: ${ $data.pollOpsBuddyTask.Failed }
-                opsBuddyResult: ${ $data.pollOpsBuddyTask.Result }
+              as: '${ $context + { opsBuddyDone: .Done, opsBuddyFailed: .Failed, opsBuddyResult: .Result } }'
 
   - askLogMonitoring:
       call: activity
@@ -94,11 +97,7 @@ do:
           scheduleToCloseTimeout:
             minutes: 3
       export:
-        as:
-          opsBuddyResult: ${ $context.opsBuddyResult }
-          logMonitoringDone: ${ $data.askLogMonitoring.Done }
-          logMonitoringResult: ${ $data.askLogMonitoring.Result }
-          logMonitoringTaskID: ${ $data.askLogMonitoring.TaskID }
+        as: '${ $context + { logMonitoringDone: .Done, logMonitoringResult: .Result, logMonitoringTaskID: .TaskID } }'
 
   - pollLogMonitoring:
       for:
@@ -106,6 +105,8 @@ do:
         in: ${ 60 }
         at: index
       while: ${ ($context.logMonitoringDone // false) == false and $data.index < 59 }
+      export:
+        as: '${ $context + { logMonitoringDone: (.[-1].Done // $context.logMonitoringDone), logMonitoringFailed: (.[-1].Failed // false), logMonitoringResult: (.[-1].Result // $context.logMonitoringResult) } }'
       do:
         - cooldown:
             wait:
@@ -122,12 +123,10 @@ do:
                 startToCloseTimeout:
                   seconds: 15
             export:
-              as:
-                opsBuddyResult: ${ $context.opsBuddyResult }
-                logMonitoringTaskID: ${ $context.logMonitoringTaskID }
-                logMonitoringDone: ${ $data.pollLogMonitoringTask.Done }
-                logMonitoringFailed: ${ $data.pollLogMonitoringTask.Failed }
-                logMonitoringResult: ${ $data.pollLogMonitoringTask.Result }
+              as: '${ $context + { logMonitoringDone: .Done, logMonitoringFailed: .Failed, logMonitoringResult: .Result } }'
 
-output:
-  as: ${ "Memory trend:\n" + $context.opsBuddyResult + "\n\nCorrelated log findings:\n" + $context.logMonitoringResult }
+  - formatOutput:
+      output:
+        as: ${ "Memory trend:\n" + $context.opsBuddyResult + "\n\nCorrelated log findings:\n" + $context.logMonitoringResult }
+      set:
+        done: true

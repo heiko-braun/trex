@@ -1,7 +1,7 @@
 ---
 title: Zigflow Adapter and Workflow Worker Supervisor (unversioned first pass)
 description: Build and run a Temporal worker for each published workflow definition, so publishing actually executes workflows instead of just validating and storing YAML
-status: proposed
+status: implemented
 author: Heiko Braun <ike.braun@googlemail.com>
 ---
 
