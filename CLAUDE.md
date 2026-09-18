@@ -7,16 +7,58 @@
 - managed agent API endpoint: https://api.agents.sixt.cloud
 
 # Tools and CLI extensions
-- get-token tool: $(which com.sixt.tool.get-token)
 - agentctl tool: $(which agentctl)
 - zigflow: $(which zigflow)
 - temporal: $(which temporal) 
 
 # Procedures
 
+## Beads
+
+This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
+You can open the UI like this: `bdui start --open`
+
+### Quick Reference
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --claim  # Claim work atomically
+bd close <id>         # Complete work
+bd dolt push          # Push beads data to remote
+```
+
+### Rule: every step/enhancement gets a ticket
+
+For this demo project specifically, every meaningful step or enhancement
+(architecture doc, workflow YAML change, a fix discovered while debugging a
+run, a new agent added to the storyline, etc.) must have a corresponding
+beads ticket that:
+
+- is created **before** or as soon as the work starts (`bd create`),
+- moves through real states as work progresses (`open` -> `in_progress` ->
+  `closed`, using `bd update`/`bd close`), not created and closed in one shot
+  after the fact,
+- carries enough detail in its description/comments (`bd comment`) for a
+  human to understand *what was tried, what broke, and what fixed it* —
+  e.g. "default activity StartToCloseTimeout (15s) too short for K8s Helper's
+  ~90s response; added activityOptions.startToCloseTimeout: 3m" — not just
+  "fix timeout".
+
+The goal is a readable trail of how the demo was built, not just a changelog
+of file diffs.
+
+### Actor attribution
+
+All `bd` commands (Claude's, in this session and future ones) must be run with
+`BEADS_ACTOR=claude` so comments/creates are attributed to "claude", not to
+the human user (`bd`'s default actor resolution falls back to git
+`user.name`/`$USER`, which would otherwise misattribute Claude's own audit
+trail entries to Heiko). Example: `BEADS_ACTOR=claude bd comment <id> "..."`.
+
 ## Retrieving a token
 
-Either via get-token tool or implcit through agentctl
+You can use `agentctl login|whoami` to fetch and refresh tokens.
 
 ## Talkig to agent on manged agents platform
 

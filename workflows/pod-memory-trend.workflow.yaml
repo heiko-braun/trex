@@ -1,0 +1,79 @@
+document:
+  dsl: 1.0.0
+  taskQueue: pod-memory-trend
+  workflowType: pod-memory-trend
+  version: 0.0.1
+  title: Pod Memory Trend Investigation
+  summary: >
+    Chains three managed agents sequentially: K8s Helper finds a pod's
+    memory trend, Log Monitoring correlates it against OpenSearch logs, and
+    Editor refines the combined findings into a final response.
+
+input:
+  schema:
+    document:
+      type: object
+      properties:
+        podName:
+          type: string
+        namespace:
+          type: string
+      required:
+        - podName
+        - namespace
+
+do:
+  - askK8sHelper:
+      run:
+        shell:
+          command: /Users/h010198/dev/prj/trex/scripts/ask-agent.sh
+          arguments:
+            - undisturbed-sink-4446
+            - ${ "Find the latest memory trend for pod " + $input.podName + " in namespace " + $input.namespace + ". Report the trend and any notable timestamps (e.g. spikes)." }
+      metadata:
+        activityOptions:
+          startToCloseTimeout:
+            minutes: 4
+          scheduleToCloseTimeout:
+            minutes: 10
+      export:
+        as:
+          memoryTrend: ${ (($data.askK8sHelper | fromjson).artifacts[0].parts // []) | map(.text) | join("\n") }
+
+  - askLogMonitoring:
+      run:
+        shell:
+          command: /Users/h010198/dev/prj/trex/scripts/ask-agent.sh
+          arguments:
+            - scintillating-bath-7308
+            - "${ \"Search OpenSearch for logs from pod \" + $input.podName + \" in namespace \" + $input.namespace + \" that correlate with this memory trend: \" + $context.memoryTrend + \". Report any errors, warnings, or events around that time.\" }"
+      metadata:
+        activityOptions:
+          startToCloseTimeout:
+            minutes: 4
+          scheduleToCloseTimeout:
+            minutes: 10
+      export:
+        as:
+          memoryTrend: ${ $context.memoryTrend }
+          logFindings: ${ (($data.askLogMonitoring | fromjson).artifacts[0].parts // []) | map(.text) | join("\n") }
+
+  - refineWithEditor:
+      run:
+        shell:
+          command: /Users/h010198/dev/prj/trex/scripts/ask-agent.sh
+          arguments:
+            - living-underwear-5566
+            - ${ "Refine and summarize the following investigation into a single, clear response.\n\nMemory trend findings:\n" + $context.memoryTrend + "\n\nCorrelated log findings:\n" + $context.logFindings }
+      metadata:
+        activityOptions:
+          startToCloseTimeout:
+            minutes: 4
+          scheduleToCloseTimeout:
+            minutes: 10
+      export:
+        as:
+          finalResponse: ${ (($data.refineWithEditor | fromjson).artifacts[0].parts // []) | map(.text) | join("\n") }
+
+output:
+  as: ${ $context.finalResponse }
