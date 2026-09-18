@@ -1,4 +1,4 @@
-.PHONY: db db-stop db-logs temporal workflow-server build test test-integration
+.PHONY: db db-stop db-logs temporal run build test test-integration
 
 DB_CONTAINER := trex-postgres
 DB_PORT := 55433
@@ -6,6 +6,10 @@ DB_USER := trex
 DB_PASSWORD := trex
 DB_NAME := trex
 DATABASE_URL := postgres://$(DB_USER):$(DB_PASSWORD)@localhost:$(DB_PORT)/$(DB_NAME)?sslmode=disable
+
+KEYCLOAK_URL := https://identity-prod.orange.sixt.com/auth
+KEYCLOAK_REALM := SixtEmployees
+KEYCLOAK_CLIENT_ID := agent-cli
 
 ## db: start a local Postgres for development/testing via podman
 db:
@@ -32,9 +36,13 @@ db-logs:
 temporal:
 	temporal server start-dev --ui-port 8233
 
-## workflow-server: run the workflow-server against the local Postgres (requires `make db` first)
-workflow-server:
-	DATABASE_URL="$(DATABASE_URL)" go run ./cmd/workflow-server
+## run: run the workflow-server against the local Postgres (requires `make db` first)
+run:
+	DATABASE_URL="$(DATABASE_URL)" \
+	KEYCLOAK_URL="$(KEYCLOAK_URL)" \
+	KEYCLOAK_REALM="$(KEYCLOAK_REALM)" \
+	KEYCLOAK_CLIENT_ID="$(KEYCLOAK_CLIENT_ID)" \
+	go run ./cmd/workflow-server
 
 ## build: compile all packages
 build:
