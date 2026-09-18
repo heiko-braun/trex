@@ -44,6 +44,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': proxyEntry,
         '/definitions': proxyEntry,
+        '/agents': proxyEntry,
       },
     },
   }

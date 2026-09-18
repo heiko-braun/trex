@@ -21,3 +21,18 @@ export interface Definition {
   status: string
   createdAt: string
 }
+
+// Mirrors internal/api's discoveredAgentResponse (workflow-server).
+export interface DiscoveredAgent {
+  id: string
+  name: string
+  type: string
+}
+
+// Mirrors internal/api's registeredAgentResponse (workflow-server).
+export interface RegisteredAgent {
+  id: string
+  name: string
+  taskQueue: string
+  running: boolean
+}

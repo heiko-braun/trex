@@ -32,6 +32,11 @@ const router = createRouter({
           name: 'definition-detail',
           component: () => import('../views/DefinitionDetailView.vue'),
         },
+        {
+          path: 'agents',
+          name: 'agents',
+          component: () => import('../views/AgentsListView.vue'),
+        },
       ],
     },
   ],

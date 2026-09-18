@@ -10,6 +10,13 @@
         >
           Workflow Definitions
         </RouterLink>
+        <RouterLink
+          to="/agents"
+          class="block rounded-md border-l-[3px] border-transparent px-2 py-1.5 text-sm text-muted-foreground hover:bg-secondary"
+          active-class="border-accent bg-sidebar-accent font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent"
+        >
+          Agents
+        </RouterLink>
       </nav>
     </aside>
 

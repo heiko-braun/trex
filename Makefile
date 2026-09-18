@@ -11,6 +11,8 @@ KEYCLOAK_URL := https://identity-stage.goorange.sixt.com/auth
 KEYCLOAK_REALM := SixtEmployees
 KEYCLOAK_CLIENT_ID := managed-agents-console
 
+MANAGED_AGENTS_API_URL := https://agents.stage.vibecoding.sixt.cloud
+
 ## db: start a local Postgres for development/testing via podman
 db:
 	podman run -d --name $(DB_CONTAINER) \
@@ -37,11 +39,15 @@ temporal:
 	temporal server start-dev --ui-port 8233
 
 ## run: run the workflow-server against the local Postgres (requires `make db` first)
+## Agent discovery is stateless: the server holds no control-plane
+## credential, it forwards whichever bearer token the caller (browser/UI)
+## already sent it. No MANAGED_AGENTS_TOKEN needed here.
 run:
 	DATABASE_URL="$(DATABASE_URL)" \
 	KEYCLOAK_URL="$(KEYCLOAK_URL)" \
 	KEYCLOAK_REALM="$(KEYCLOAK_REALM)" \
 	KEYCLOAK_CLIENT_ID="$(KEYCLOAK_CLIENT_ID)" \
+	MANAGED_AGENTS_API_URL="$(MANAGED_AGENTS_API_URL)" \
 	go run ./cmd/workflow-server
 
 ## build: compile all packages

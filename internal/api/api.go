@@ -4,15 +4,21 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/zigflow/zigflow/pkg/zigflow"
+
+	"github.com/heiko-braun/trex/internal/agents"
 	"github.com/heiko-braun/trex/internal/auth"
 	"github.com/heiko-braun/trex/internal/buildid"
 	"github.com/heiko-braun/trex/internal/validator"
+	"github.com/heiko-braun/trex/internal/worker"
 	"github.com/heiko-braun/trex/store"
 )
 
@@ -27,15 +33,44 @@ type AuthConfig struct {
 	AdminRoles     []string
 }
 
-// Server wires the Publish API's HTTP handlers to a definition store.
-type Server struct {
-	store store.DefinitionStore
-	auth  AuthConfig
+// AgentDiscoverer fetches the live agent catalog from the managed agents
+// control plane using the caller's own token, per request. Implemented by
+// *agents.Client.
+type AgentDiscoverer interface {
+	ListAgents(ctx context.Context, token string) ([]agents.Agent, error)
 }
 
-// New creates a Server backed by the given definition store and auth config.
-func New(s store.DefinitionStore, authCfg AuthConfig) *Server {
-	return &Server{store: s, auth: authCfg}
+// AgentSupervisor starts/stops Temporal workers for registered agents and
+// reports their status. Implemented by *worker.Supervisor.
+type AgentSupervisor interface {
+	Register(agent agents.Agent) error
+	Unregister(slug string)
+	Statuses() []worker.Status
+}
+
+// WorkflowSupervisor starts a Temporal worker for a published workflow
+// definition so it can actually execute, replacing any worker already
+// running for the same (tenant, name). Implemented by
+// *workflowworker.Supervisor.
+type WorkflowSupervisor interface {
+	Register(tenant, name, taskQueue string, yamlBytes []byte) error
+}
+
+// Server wires the Publish API's HTTP handlers to a definition store.
+type Server struct {
+	store          store.DefinitionStore
+	auth           AuthConfig
+	discoverer     AgentDiscoverer
+	supervisor     AgentSupervisor
+	registrations  store.AgentRegistrationStore
+	workflowWorker WorkflowSupervisor
+}
+
+// New creates a Server backed by the given definition store, discovery
+// client, agent worker supervisor, agent registration store, and
+// workflow worker supervisor.
+func New(s store.DefinitionStore, authCfg AuthConfig, discoverer AgentDiscoverer, supervisor AgentSupervisor, registrations store.AgentRegistrationStore, workflowWorker WorkflowSupervisor) *Server {
+	return &Server{store: s, auth: authCfg, discoverer: discoverer, supervisor: supervisor, registrations: registrations, workflowWorker: workflowWorker}
 }
 
 const authConfigPath = "/api/v1/auth/config"
@@ -47,6 +82,10 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	protected.HandleFunc("POST /definitions", s.handlePublish)
 	protected.HandleFunc("GET /definitions", s.handleList)
 	protected.HandleFunc("GET /definitions/{tenant}/{name}", s.handleGetCurrent)
+	protected.HandleFunc("GET /agents", s.handleDiscoverAgents)
+	protected.HandleFunc("GET /agents/registered", s.handleListRegisteredAgents)
+	protected.HandleFunc("POST /agents/{id}/register", s.handleRegisterAgent)
+	protected.HandleFunc("DELETE /agents/{id}/register", s.handleUnregisterAgent)
 
 	middleware := auth.Middleware(auth.MiddlewareConfig{
 		Validator:   s.auth.Validator,
@@ -55,7 +94,24 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	})
 
 	mux.HandleFunc("GET "+authConfigPath, s.handleAuthConfig)
-	mux.Handle("/", middleware(protected))
+	mux.Handle("/", recoverMiddleware(middleware(protected)))
+}
+
+// recoverMiddleware turns a panic in any handler into a 500 instead of
+// crashing the process. zigflow.LoadFromBytes (called by validator.Validate
+// on every publish, and by the workflow worker supervisor) has been
+// observed to panic rather than return an error on some malformed input,
+// so one bad request must not take down every other in-flight request.
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("panic handling request", "path", r.URL.Path, "panic", rec)
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 type authConfigResponse struct {
@@ -115,6 +171,113 @@ func toResponse(d *store.Definition) definitionResponse {
 	}
 }
 
+type discoveredAgentResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type registeredAgentResponse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	TaskQueue string `json:"taskQueue"`
+	Running   bool   `json:"running"`
+}
+
+// bearerToken extracts the raw Bearer token from the request's own
+// Authorization header, so it can be forwarded to the managed agents
+// control plane as-is: discovery is stateless and uses whichever
+// credential the caller already has, not one the server holds.
+func bearerToken(r *http.Request) string {
+	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+}
+
+func (s *Server) handleDiscoverAgents(w http.ResponseWriter, r *http.Request) {
+	discovered, err := s.discoverer.ListAgents(r.Context(), bearerToken(r))
+	if err != nil {
+		slog.Error("discover agents", "error", err)
+		writeError(w, http.StatusBadGateway, "discover agents: "+err.Error())
+		return
+	}
+
+	resp := make([]discoveredAgentResponse, 0, len(discovered))
+	for _, a := range discovered {
+		resp = append(resp, discoveredAgentResponse{ID: a.ID, Name: a.Name, Type: a.Type})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleListRegisteredAgents(w http.ResponseWriter, r *http.Request) {
+	statuses := s.supervisor.Statuses()
+	resp := make([]registeredAgentResponse, 0, len(statuses))
+	for _, st := range statuses {
+		resp = append(resp, registeredAgentResponse{
+			ID:        st.Agent.ID,
+			Name:      st.Agent.Name,
+			TaskQueue: st.TaskQueue,
+			Running:   st.Running,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type registerAgentRequest struct {
+	Name string `json:"name"`
+}
+
+func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+
+	var req registerAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	agent := agents.Agent{ID: agentID, Name: req.Name, Enabled: true}
+
+	if err := s.supervisor.Register(agent); err != nil {
+		slog.Error("register agent worker", "agent", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "register agent worker: "+err.Error())
+		return
+	}
+
+	if _, err := s.registrations.Register(r.Context(), &store.AgentRegistration{
+		AgentID:   agentID,
+		Name:      req.Name,
+		TaskQueue: agent.TaskQueue(),
+	}); err != nil {
+		slog.Error("persist agent registration", "agent", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "persist agent registration: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, registeredAgentResponse{
+		ID:        agentID,
+		Name:      req.Name,
+		TaskQueue: agent.TaskQueue(),
+		Running:   true,
+	})
+}
+
+func (s *Server) handleUnregisterAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+
+	s.supervisor.Unregister(agentID)
+
+	if err := s.registrations.Unregister(r.Context(), agentID); err != nil {
+		slog.Error("delete agent registration", "agent", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "delete agent registration: "+err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	var req publishRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -152,6 +315,21 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("create definition", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	doc, err := zigflow.LoadFromBytes(yamlBytes)
+	if err != nil {
+		// Already passed validator.Validate above, so this would only
+		// fail on a Zigflow-internal inconsistency; the definition is
+		// stored either way, just not yet runnable.
+		slog.Error("parse published definition for worker start", "tenant", req.Tenant, "name", req.Name, "error", err)
+		writeError(w, http.StatusInternalServerError, "stored but failed to start worker: "+err.Error())
+		return
+	}
+	if err := s.workflowWorker.Register(req.Tenant, req.Name, doc.Document.Namespace, yamlBytes); err != nil {
+		slog.Error("start workflow worker", "tenant", req.Tenant, "name", req.Name, "error", err)
+		writeError(w, http.StatusInternalServerError, "stored but failed to start worker: "+err.Error())
 		return
 	}
 
