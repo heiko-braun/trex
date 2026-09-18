@@ -18,9 +18,21 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'definitions',
-      component: () => import('../views/DefinitionsListView.vue'),
+      component: () => import('../views/AppLayout.vue'),
       meta: { requiresAuth: true },
+      children: [
+        { path: '', redirect: { name: 'definitions' } },
+        {
+          path: 'definitions',
+          name: 'definitions',
+          component: () => import('../views/DefinitionsListView.vue'),
+        },
+        {
+          path: 'definitions/:tenant/:name',
+          name: 'definition-detail',
+          component: () => import('../views/DefinitionsListView.vue'),
+        },
+      ],
     },
   ],
 })
