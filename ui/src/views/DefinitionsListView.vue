@@ -4,19 +4,19 @@
       <h1 class="text-2xl font-bold">Workflow Definitions</h1>
       <button
         @click="store.fetchAll()"
-        class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50"
+        class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary"
       >
         Refresh
       </button>
     </div>
 
-    <p v-if="store.isLoading" class="text-neutral-500">Loading...</p>
-    <p v-else-if="store.error" class="text-red-600">{{ store.error }}</p>
-    <p v-else-if="store.definitions.length === 0" class="text-neutral-500">No definitions published yet.</p>
+    <p v-if="store.isLoading" class="text-muted-foreground">Loading...</p>
+    <p v-else-if="store.error" class="text-destructive">{{ store.error }}</p>
+    <p v-else-if="store.definitions.length === 0" class="text-muted-foreground">No definitions published yet.</p>
 
     <table v-else class="w-full max-w-4xl border-collapse text-left text-sm">
       <thead>
-        <tr class="border-b border-neutral-200 text-neutral-500">
+        <tr class="border-b border-border text-muted-foreground">
           <th class="py-2 pr-4 font-medium">Tenant</th>
           <th class="py-2 pr-4 font-medium">Name</th>
           <th class="py-2 pr-4 font-medium">Build ID</th>
@@ -28,14 +28,14 @@
         <tr
           v-for="def in store.definitions"
           :key="`${def.tenant}/${def.name}/${def.buildId}`"
-          class="cursor-pointer border-b border-neutral-100 hover:bg-neutral-50"
+          class="cursor-pointer border-b border-border/60 hover:bg-secondary"
           @click="openDetail(def)"
         >
           <td class="py-2 pr-4">{{ def.tenant }}</td>
           <td class="py-2 pr-4">{{ def.name }}</td>
           <td class="py-2 pr-4 font-mono text-xs">{{ def.buildId }}</td>
           <td class="py-2 pr-4">{{ def.status }}</td>
-          <td class="py-2 pr-4 text-neutral-500">{{ new Date(def.createdAt).toLocaleString() }}</td>
+          <td class="py-2 pr-4 text-muted-foreground">{{ new Date(def.createdAt).toLocaleString() }}</td>
         </tr>
       </tbody>
     </table>

@@ -1,15 +1,15 @@
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-neutral-50">
-    <div class="w-full max-w-md space-y-8 rounded-lg border border-neutral-200 bg-white p-8 shadow-lg">
+  <div class="flex min-h-screen items-center justify-center bg-muted">
+    <div class="w-full max-w-md space-y-8 rounded-lg border border-border bg-card p-8 shadow-lg">
       <div class="text-center">
         <h1 class="text-3xl font-bold">Zigflow Workflow Server</h1>
-        <p class="mt-2 text-neutral-500">Sign in to view stored workflow definitions</p>
+        <p class="mt-2 text-muted-foreground">Sign in to view stored workflow definitions</p>
       </div>
 
       <button
         @click="handleLogin"
         :disabled="isLoading"
-        class="w-full rounded-md bg-neutral-900 px-4 py-3 text-white hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        class="w-full rounded-md bg-primary px-4 py-3 text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
       >
         <span v-if="isLoading">Signing in...</span>
         <span v-else>Sign in with SSO</span>

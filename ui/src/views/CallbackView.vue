@@ -4,7 +4,7 @@
       <div
         class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent"
       ></div>
-      <p class="text-neutral-500">Completing sign in...</p>
+      <p class="text-muted-foreground">Completing sign in...</p>
     </div>
   </div>
 </template>

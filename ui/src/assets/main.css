@@ -1,1 +1,105 @@
 @import 'tailwindcss';
+
+/* Design tokens ported from com.sixt.web.managed-agents/src/assets/main.css
+   (see that repo's specs/colors.md) so this UI matches its look — same
+   near-monochrome base + Sixt-orange accent used sparingly. Light mode only;
+   no dark-mode variant needed for this slice. */
+:root {
+  --ma-ink: #16150f;
+  --ma-text-secondary: #5f5e5a;
+  --ma-text-tertiary: #888780;
+  --ma-surface: #f1efe8;
+  --ma-canvas: #ffffff;
+  --ma-border: rgba(22, 21, 15, 0.15);
+  --ma-border-strong: rgba(22, 21, 15, 0.3);
+
+  --ma-accent-tint: #ffe7d6;
+  --ma-accent: #ff5f00;
+  --ma-accent-deep: #cc4a00;
+
+  --ma-info-tint: #e1f0ee;
+  --ma-info: #2c7a6e;
+  --ma-info-deep: #1b4d45;
+
+  --ma-risk-low-tint: #fcebeb;
+  --ma-risk-low: #e24b4a;
+  --ma-risk-low-deep: #a32d2d;
+  --ma-risk-mid-tint: #faeeda;
+  --ma-risk-mid: #ef9f27;
+  --ma-risk-mid-deep: #854f0b;
+  --ma-risk-safe-tint: #eaf3de;
+  --ma-risk-safe: #639922;
+  --ma-risk-safe-deep: #3b6d11;
+
+  --background: var(--ma-canvas);
+  --foreground: var(--ma-ink);
+  --card: var(--ma-canvas);
+  --card-foreground: var(--ma-ink);
+  --primary: var(--ma-ink);
+  --primary-foreground: #ffffff;
+  --secondary: var(--ma-surface);
+  --secondary-foreground: var(--ma-ink);
+  --muted: var(--ma-surface);
+  --muted-foreground: var(--ma-text-secondary);
+  --accent: var(--ma-surface);
+  --accent-foreground: var(--ma-ink);
+  --destructive: var(--ma-risk-low);
+  --destructive-foreground: #ffffff;
+  --border: var(--ma-border);
+  --input: var(--ma-border);
+  --ring: var(--ma-accent);
+  --sidebar: var(--ma-canvas);
+  --sidebar-foreground: var(--ma-ink);
+  --sidebar-accent: var(--ma-accent-tint);
+  --sidebar-accent-foreground: var(--ma-accent-deep);
+  --sidebar-border: var(--ma-border);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+}

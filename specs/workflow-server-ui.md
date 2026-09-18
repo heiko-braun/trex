@@ -175,3 +175,21 @@ still one read-only definitions slice):
   `curl -H "Accept: text/html" .../definitions/acme/wf` → 200 (SPA
   shell); `curl -H "Accept: application/json" .../definitions` → 401
   (proxied to the real backend, no token).
+
+### Follow-on: align styles with com.sixt.web.managed-agents
+
+Ported that repo's design tokens (see its `specs/colors.md`) into
+`ui/src/assets/main.css`: near-monochrome base (ink `#16150F`, surface
+`#F1EFE8`, canvas white), Sixt-orange accent (`#FF5F00`/`#CC4A00`) used only
+for links/active-nav/focus-ring per that spec's design rules, mapped through
+a `@theme inline` block so Tailwind utilities (`bg-background`,
+`text-muted-foreground`, `border-border`, etc.) resolve to them. Light mode
+only — no dark-mode variant, no shadcn-vue component library pulled in (this
+app doesn't use shadcn primitives, just matches the color language via plain
+Tailwind classes). All five views (`AppLayout`, `DefinitionsListView`,
+`DefinitionDetailView`, `LoginView`, `CallbackView`) restyled off the shared
+tokens instead of raw `neutral-*`/`red-*` Tailwind colors. Verified `npm run
+build`'s compiled CSS contains the three core brand hex values
+(`#16150f`/`#f1efe8`/`#ff5f00`); did not verify pixel-level rendering in a
+browser (no browser automation available in this environment) — asked the
+user to check `http://localhost:8484` visually.

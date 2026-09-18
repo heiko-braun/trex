@@ -1,24 +1,24 @@
 <template>
   <div class="flex h-full flex-col">
-    <header class="shrink-0 border-b border-neutral-200 bg-white px-6 py-4">
-      <nav class="mb-2 flex items-center gap-1.5 text-xs text-neutral-500">
-        <RouterLink :to="{ name: 'definitions' }" class="hover:text-neutral-900 hover:underline">
+    <header class="shrink-0 border-b border-border bg-card px-6 py-4">
+      <nav class="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <RouterLink :to="{ name: 'definitions' }" class="text-[color:var(--ma-accent-deep)] hover:underline">
           Workflow Definitions
         </RouterLink>
         <span aria-hidden="true">/</span>
-        <span class="text-neutral-900">{{ tenant }}</span>
+        <span class="text-foreground">{{ tenant }}</span>
         <span aria-hidden="true">/</span>
-        <span class="text-neutral-900">{{ name }}</span>
+        <span class="text-foreground">{{ name }}</span>
       </nav>
 
       <div class="flex items-center justify-between">
         <div>
           <h1 class="text-lg font-semibold">{{ tenant }}/{{ name }}</h1>
-          <p v-if="selected" class="font-mono text-xs text-neutral-500">{{ selected.buildId }}</p>
+          <p v-if="selected" class="font-mono text-xs text-muted-foreground">{{ selected.buildId }}</p>
         </div>
         <RouterLink
           :to="{ name: 'definitions' }"
-          class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50"
+          class="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
         >
           Back to list
         </RouterLink>
@@ -26,19 +26,19 @@
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto p-6">
-      <p v-if="store.isLoading" class="text-neutral-500">Loading...</p>
-      <p v-else-if="store.error" class="text-red-600">{{ store.error }}</p>
-      <p v-else-if="!selected" class="text-neutral-500">No such definition.</p>
+      <p v-if="store.isLoading" class="text-muted-foreground">Loading...</p>
+      <p v-else-if="store.error" class="text-destructive">{{ store.error }}</p>
+      <p v-else-if="!selected" class="text-muted-foreground">No such definition.</p>
 
       <template v-else>
         <dl class="mb-4 grid grid-cols-2 gap-2 text-sm">
-          <dt class="text-neutral-500">Status</dt>
+          <dt class="text-muted-foreground">Status</dt>
           <dd>{{ selected.status }}</dd>
-          <dt class="text-neutral-500">Created</dt>
+          <dt class="text-muted-foreground">Created</dt>
           <dd>{{ new Date(selected.createdAt).toLocaleString() }}</dd>
         </dl>
 
-        <pre class="overflow-x-auto rounded-md bg-neutral-900 p-4 text-xs text-neutral-100"><code>{{ selected.yaml }}</code></pre>
+        <pre class="overflow-x-auto rounded-md bg-[color:var(--ma-ink)] p-4 text-xs text-white"><code>{{ selected.yaml }}</code></pre>
       </template>
     </div>
   </div>
