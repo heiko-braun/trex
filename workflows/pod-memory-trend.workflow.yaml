@@ -5,9 +5,10 @@ document:
   version: 0.0.1
   title: Pod Memory Trend Investigation
   summary: >
-    Chains two managed agents sequentially, calling each as a Temporal
-    activity: Ops Buddy finds a pod's memory trend, then Log Monitoring
-    correlates it against OpenSearch logs. Each agent must be registered
+    Chains three managed agents sequentially, calling each as a Temporal
+    activity: Ops Buddy finds a pod's memory trend, Log Monitoring
+    correlates it against OpenSearch logs, then Editor synthesizes both
+    into one clear response. Each agent must be registered
     with the workflow server first — see "Running a workflow: startup
     order" in CLAUDE.md — since call: activity routes to whichever agent
     worker is polling that task queue. invoke-agent returns immediately
@@ -125,8 +126,50 @@ do:
             export:
               as: '${ $context + { logMonitoringDone: .Done, logMonitoringFailed: .Failed, logMonitoringResult: .Result } }'
 
+  - askEditor:
+      call: activity
+      with:
+        name: invoke-agent
+        taskQueue: agent-uncovered-bridge-6836
+        arguments:
+          - Input: "${ \"Refine and summarize the following investigation into a single, clear response.\\n\\nMemory trend findings:\\n\" + $context.opsBuddyResult + \"\\n\\nCorrelated log findings:\\n\" + $context.logMonitoringResult }"
+      metadata:
+        activityOptions:
+          startToCloseTimeout:
+            seconds: 60
+          scheduleToCloseTimeout:
+            minutes: 3
+      export:
+        as: '${ $context + { editorDone: .Done, editorResult: .Result, editorTaskID: .TaskID } }'
+
+  - pollEditor:
+      for:
+        each: attempt
+        in: ${ 60 }
+        at: index
+      while: ${ ($context.editorDone // false) == false and $data.index < 59 }
+      export:
+        as: '${ $context + { editorDone: (.[-1].Done // $context.editorDone), editorFailed: (.[-1].Failed // false), editorResult: (.[-1].Result // $context.editorResult) } }'
+      do:
+        - cooldown:
+            wait:
+              seconds: 8
+        - pollEditorTask:
+            call: activity
+            with:
+              name: poll-agent-task
+              taskQueue: agent-uncovered-bridge-6836
+              arguments:
+                - TaskID: ${ $context.editorTaskID }
+            metadata:
+              activityOptions:
+                startToCloseTimeout:
+                  seconds: 15
+            export:
+              as: '${ $context + { editorDone: .Done, editorFailed: .Failed, editorResult: .Result } }'
+
   - formatOutput:
       output:
-        as: ${ "Memory trend:\n" + $context.opsBuddyResult + "\n\nCorrelated log findings:\n" + $context.logMonitoringResult }
+        as: ${ $context.editorResult }
       set:
         done: true
