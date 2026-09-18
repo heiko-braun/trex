@@ -13,6 +13,54 @@
 
 # Procedures
 
+## Running a workflow: startup order
+
+Before authoring or running any Zigflow workflow that targets a managed
+agent (`call: activity, name: invoke-agent` on task queue `agent-<id>`),
+bring the stack up in this order. Skipping a step means the workflow's
+`call: activity` has nowhere to route to — either no worker is polling the
+task queue (agent not registered) or the workflow server itself can't
+start (no Temporal/Postgres).
+
+1. **Temporal dev server** (workflow orchestration):
+   ```bash
+   make temporal
+   # Temporal Server: localhost:7233
+   # Temporal UI:     http://localhost:8233
+   ```
+2. **Postgres** (workflow-server's own store, once per machine/session):
+   ```bash
+   make db
+   ```
+3. **Workflow server** (hosts Zigflow workers + the agent registration API):
+   ```bash
+   make run
+   ```
+   This needs no managed-agents credential of its own — see
+   specs/agent-discovery-and-registration.md. Discovery
+   (`GET /agents`) and registration (`POST /agents/{id}/register`) both
+   run under the caller's own token, forwarded per request.
+4. **Register the agents the new workflow will call**, one Temporal
+   worker per agent (task queue `agent-<id>`), *before* running the
+   workflow — a workflow started against an unregistered agent's task
+   queue just sits at `schedule-to-start` timeout, waiting for a poller
+   that never shows up:
+   ```bash
+   agentctl login   # if the cached session token has expired (~5 min TTL)
+   agentctl agent list                                   # find id + name
+   ./scripts/register-agent.sh <agent-id> <agent-name>   # registers + starts the worker
+   ```
+   Confirm registration either via `curl -H "Authorization: Bearer ..." http://localhost:8080/agents/registered`
+   or in the Temporal UI under **Task Queues** -> `agent-<id>` ->
+   **Pollers** (a poller listed there is the workflow-server's worker for
+   that agent; nothing shows under **Workflows** until an execution
+   actually calls it).
+5. **Now** author/run the workflow YAML with `zigflow run` — its
+   `call: activity, name: invoke-agent` steps route to whichever agents
+   were registered in step 4.
+
+To unregister an agent later: `curl -X DELETE -H "Authorization: Bearer ..." http://localhost:8080/agents/<agent-id>/register`.
+
 ## Beads
 
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
@@ -66,11 +114,24 @@ trail entries to Heiko). Example: `BEADS_ACTOR=claude bd comment <id> "..."`.
 
 ## Retrieving a token
 
-You can use `agentctl login|whoami` to fetch and refresh tokens.
+You can use `agentctl login|whoami` to fetch and refresh tokens. The
+cached token (`~/.agentctl/tokens/default.yaml`) is short-lived (~5 min
+observed TTL) and is what `scripts/register-agent.sh` and the workflow
+server's own `/agents` endpoints use — see "Running a workflow: startup
+order" above.
 
-## Talkig to agent on manged agents platform
+## Talking to agents on the managed agents platform
 
-Agentctl for agent discovery and it's a2a support to dispatch task
+- **From a running workflow**: via the workflow server's registered
+  activities (`call: activity, name: invoke-agent` on task queue
+  `agent-<id>`), not by shelling out to `agentctl` — see "Running a
+  workflow: startup order" above and specs/agent-discovery-and-registration.md.
+  This is the only path new workflows should use.
+- **Ad hoc, outside a workflow** (manual testing, debugging a single
+  agent): `agentctl agent list`/`agentctl a2a send` directly. This is what
+  the older `run: shell` + `scripts/ask-agent.sh` pattern in
+  `workflows/pod-memory-trend.workflow.yaml` used before agent activities
+  existed — do not use that pattern for new workflows.
 
 # APIKeys, etc
 

@@ -15,7 +15,7 @@ The workflow server runs Zigflow YAML definitions as Temporal workflows and swap
 
 **Non-goals**
 
-- Implementing domain activities. These stay in separate activity workers (any Temporal SDK).
+- Implementing domain activities. These stay in separate activity workers (any Temporal SDK) — the one exception is `invoke-agent`, one activity per registered managed-agents platform agent, which the server hosts itself so Zigflow workflows can call agents via `call: activity` without a separate worker process per agent. See specs/agent-discovery-and-registration.md.
 - Replacing the Temporal server, UI or client SDKs for starting, signalling or querying workflows.
 - In-place upgrades of running executions to a new definition (v1).
 
