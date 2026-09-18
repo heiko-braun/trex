@@ -48,6 +48,14 @@ beads ticket that:
 The goal is a readable trail of how the demo was built, not just a changelog
 of file diffs.
 
+### Rule: every spec gets a ticket
+
+Every spec created under `specs/` (via the `/spec` skill) and its
+implementation must have a corresponding beads ticket, following the same
+create-before-work / real-state-transitions / detailed-comments rules above.
+One ticket per spec is enough — track the whole implementation under it
+rather than opening a separate ticket per file touched.
+
 ### Actor attribution
 
 All `bd` commands (Claude's, in this session and future ones) must be run with
