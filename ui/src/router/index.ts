@@ -30,7 +30,7 @@ const router = createRouter({
         {
           path: 'definitions/:tenant/:name',
           name: 'definition-detail',
-          component: () => import('../views/DefinitionsListView.vue'),
+          component: () => import('../views/DefinitionDetailView.vue'),
         },
       ],
     },

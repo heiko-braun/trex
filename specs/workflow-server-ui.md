@@ -149,16 +149,18 @@ still one read-only definitions slice):
 - `src/views/AppLayout.vue` (new): left sidebar nav + `<RouterView>`,
   wraps every authenticated route. Currently one nav entry ("Workflow
   Definitions"); more entries land here as the UI grows.
-- `DefinitionsListView.vue` restructured into a split pane: the list on
-  the left, and — when a row is selected — a right-hand detail panel
-  showing that definition's status/created-at/full YAML. Selection is
-  route-driven (`/definitions/:tenant/:name`, route name
+- Definition detail is a separate full view (`DefinitionDetailView.vue`),
+  not a split pane — first attempt was a right-hand panel sharing
+  `DefinitionsListView.vue`, revised per feedback to a dedicated route
+  component instead. `DefinitionsListView.vue` stays list-only.
+  Navigation is route-driven (`/definitions/:tenant/:name`, route name
   `definition-detail`), not local component state, so the detail is
-  linkable/shareable and survives a page refresh (per the recommended
-  option when scoping this).
-- The detail panel has a proper header: breadcrumb
+  linkable/shareable and survives a page refresh.
+- The detail view has a proper header: breadcrumb
   (`Workflow Definitions / {tenant} / {name}`) above the title/build-ID/
-  Close-button row, both driven by `RouterLink`.
+  "Back to list" row, both driven by `RouterLink`. If the definitions
+  store hasn't loaded yet (e.g. a direct link/refresh landing straight on
+  the detail route), the view fetches it itself before rendering.
 - **Bug found and fixed while verifying the new route**: a hard refresh
   (or direct URL visit) of `/definitions/:tenant/:name` was proxied
   straight to the backend by `ui/vite.config.ts`'s `/definitions` proxy
