@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/heiko-braun/trex/internal/auth"
 	"github.com/heiko-braun/trex/internal/buildid"
@@ -95,20 +96,22 @@ type publishRequest struct {
 }
 
 type definitionResponse struct {
-	Tenant  string `json:"tenant"`
-	Name    string `json:"name"`
-	BuildID string `json:"buildId"`
-	YAML    string `json:"yaml"`
-	Status  string `json:"status"`
+	Tenant    string    `json:"tenant"`
+	Name      string    `json:"name"`
+	BuildID   string    `json:"buildId"`
+	YAML      string    `json:"yaml"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 func toResponse(d *store.Definition) definitionResponse {
 	return definitionResponse{
-		Tenant:  d.Tenant,
-		Name:    d.Name,
-		BuildID: d.BuildID,
-		YAML:    d.YAML,
-		Status:  string(d.Status),
+		Tenant:    d.Tenant,
+		Name:      d.Name,
+		BuildID:   d.BuildID,
+		YAML:      d.YAML,
+		Status:    string(d.Status),
+		CreatedAt: d.CreatedAt,
 	}
 }
 

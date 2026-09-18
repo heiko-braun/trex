@@ -1,7 +1,7 @@
 ---
 title: Workflow Server UI (definitions list)
 description: Vue 3 SPA showing stored workflow definitions, authenticated via the same Keycloak flow as com.sixt.web.managed-agents
-status: proposed
+status: implemented
 author: Heiko Braun <ike.braun@googlemail.com>
 ---
 
@@ -18,16 +18,16 @@ in this slice.
 
 ## Acceptance Criteria
 
-- [ ] Visiting the app with no session redirects to Keycloak login; after
+- [x] Visiting the app with no session redirects to Keycloak login; after
       login, lands back on the definitions list.
-- [ ] The list view calls `GET /definitions` with the user's bearer token
+- [x] The list view calls `GET /definitions` with the user's bearer token
       and renders each row's tenant, name, build ID, status, and created-at,
       newest first.
-- [ ] A 401 from any API call (session expired, token revoked) redirects
+- [x] A 401 from any API call (session expired, token revoked) redirects
       back to login — no dead "stuck loading" state.
-- [ ] `npm run build` produces a working static bundle (`vue-tsc` type
+- [x] `npm run build` produces a working static bundle (`vue-tsc` type
       -check + `vite build`, matching the reference app's `build` script).
-- [ ] Dev server (`npm run dev`) proxies `/definitions` and
+- [x] Dev server (`npm run dev`) proxies `/definitions` and
       `/api` to the configured `workflow-server` origin, so the app talks to
       `http://localhost:5173` in the browser and the real backend underneath
       — same shape as the reference app's `vite.config.ts` proxy.
@@ -84,3 +84,51 @@ the user as a prerequisite before implementation starts on this spec (see
 `specs/workflow-server-auth.md`'s sibling discussion). Until that's done,
 `npm run dev` will build and run, but the login redirect will fail at
 Keycloak with a redirect_uri mismatch.
+
+## Implementation notes
+
+- Scaffolded via `npm create vite@latest ui -- --template vue-ts`, then
+  trimmed to the default template's assets/components and added
+  `vue-router`, `pinia`, `keycloak-js`, Tailwind 4
+  (`@tailwindcss/postcss`+`postcss`+`autoprefixer`), and `vue-tsc` — no
+  shadcn-vue/reka-ui component library pulled in for this slice, since a
+  single read-only table doesn't need it; plain Tailwind utility classes are
+  enough. Revisit if/when a second view needs real form controls.
+- `src/services/auth.ts` and `src/services/http.ts` ported from
+  `com.sixt.web.managed-agents`, trimmed: no admin-role helpers
+  (`isAdmin`/`hasAdminRole`/`getRoles`), no fallback `AuthConfig` on fetch
+  failure (this app has nothing sensible to fall back to without a real
+  `/api/v1/auth/config`, so a failed fetch surfaces as a thrown error
+  instead of silently degrading), no `silentCheckSsoRedirectUri` (no
+  `silent-check-sso.html` asset in this slice).
+- `src/stores/auth.ts` trimmed similarly (no roles/isAdmin/userRole).
+  `src/stores/definitions.ts` is new: `fetchAll()` via `authedFetch`,
+  exposes `definitions`/`isLoading`/`error`.
+- Router (`src/router/index.ts`) trimmed to 3 routes: `/login`, `/callback`,
+  `/` (the definitions list), same `beforeEach` guard shape as the
+  reference app minus the `requiresAdmin` branch (nothing admin-gated yet).
+- `internal/api`'s `definitionResponse` gained a `createdAt` field (was
+  missing before this slice — the Definition Store spec never needed it
+  since neither of its two endpoints displayed a list) so the UI's newest-
+  first acceptance criterion has real data to render; `store.Definition`
+  already carried `CreatedAt`, so this was JSON-shape-only, no store change.
+- `ui/vite.config.ts` proxies `/api` and `/definitions` to
+  `VITE_API_BASE_URL` (default `http://localhost:8080`, matching the root
+  Makefile's `workflow-server` target) — verified by running the real
+  `workflow-server` binary + Vite dev server together and confirming
+  `curl http://localhost:5173/api/v1/auth/config` returns the backend's real
+  JSON and `curl http://localhost:5173/definitions` returns the backend's
+  real 401 (no token), proving the proxy reaches the live server rather
+  than a mock.
+- `npm run build` (`vue-tsc -b && vite build`) passes cleanly. One fixup
+  needed: TypeScript's `baseUrl` compiler option is deprecated in the
+  scaffolded TS version, so the `@/*` path alias is declared via `paths`
+  alone (no `baseUrl`), which still resolves correctly since the paths are
+  relative to `tsconfig.app.json` itself.
+- Did not verify the full interactive Keycloak login redirect in a real
+  browser (no browser automation available in this environment) — per the
+  Notes above, that also requires a redirect-URI registration this repo
+  doesn't control. Verified everything up to that boundary: real Keycloak
+  realm reachable (`/.well-known/openid-configuration` returns 200), real
+  `/api/v1/auth/config` values flow through the dev proxy into what
+  `services/auth.ts` would construct the `Keycloak` client from.
