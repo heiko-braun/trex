@@ -10,9 +10,18 @@ import (
 
 	"go.temporal.io/sdk/testsuite"
 
+	"github.com/heiko-braun/trex/internal/manifest"
 	"github.com/heiko-braun/trex/internal/workflowworker"
 	"github.com/heiko-braun/trex/store"
 )
+
+// fakeBlobStore is a no-op BlobStore, standing in for
+// *blobstore.MinioStore in tests that don't exercise envelope writing.
+type fakeBlobStore struct{}
+
+func (fakeBlobStore) PutIndex(_ context.Context, _, _ string, _ map[string]manifest.Ref) error {
+	return nil
+}
 
 var devServer *testsuite.DevServer
 
@@ -45,7 +54,7 @@ func TestMain(m *testing.M) {
 // bad row must not take down the boot-time restore loop for every other
 // definition.
 func TestRestoreWorkflowWorker_RecoversFromZigflowPanic(t *testing.T) {
-	supervisor := workflowworker.NewSupervisor(devServer.Client())
+	supervisor := workflowworker.NewSupervisor(devServer.Client(), fakeBlobStore{})
 	defer supervisor.Stop()
 
 	def := &store.Definition{Tenant: "acme", Name: "broken", YAML: "document: {}"}
@@ -60,7 +69,7 @@ func TestRestoreWorkflowWorker_RecoversFromZigflowPanic(t *testing.T) {
 }
 
 func TestRestoreWorkflowWorker_StartsWorkerForValidDefinition(t *testing.T) {
-	supervisor := workflowworker.NewSupervisor(devServer.Client())
+	supervisor := workflowworker.NewSupervisor(devServer.Client(), fakeBlobStore{})
 	defer supervisor.Stop()
 
 	def := &store.Definition{Tenant: "acme", Name: "valid", YAML: `

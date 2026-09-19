@@ -107,3 +107,63 @@ func TestMinioStore_Get_DifferentTenantsAreIsolated(t *testing.T) {
 		t.Error("Get under a different tenant succeeded, want error (tenants must be isolated by key prefix)")
 	}
 }
+
+func TestMinioStore_PutIndexThenGetIndex_RoundTrips(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	workflowID := "pod-memory-trend-test-1"
+	slots := map[string]manifest.Ref{
+		"opsBuddyRef":      {Digest: "sha256:aaa", Size: 3, MediaType: "text/plain", Bucket: "trex-test"},
+		"logMonitoringRef": {Digest: "sha256:bbb", Size: 4, MediaType: "text/plain", Bucket: "trex-test"},
+	}
+
+	if err := store.PutIndex(ctx, "platform", workflowID, slots); err != nil {
+		t.Fatalf("PutIndex: %v", err)
+	}
+
+	got, err := store.GetIndex(ctx, "platform", workflowID)
+	if err != nil {
+		t.Fatalf("GetIndex: %v", err)
+	}
+	if len(got) != len(slots) {
+		t.Fatalf("GetIndex returned %d slots, want %d", len(got), len(slots))
+	}
+	for slot, want := range slots {
+		if got[slot] != want {
+			t.Errorf("slot %q = %+v, want %+v", slot, got[slot], want)
+		}
+	}
+}
+
+func TestMinioStore_PutIndex_OverwritesPreviousValue(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	workflowID := "pod-memory-trend-test-2"
+
+	first := map[string]manifest.Ref{"opsBuddyRef": {Digest: "sha256:aaa"}}
+	second := map[string]manifest.Ref{"opsBuddyRef": {Digest: "sha256:zzz"}, "editorRef": {Digest: "sha256:yyy"}}
+
+	if err := store.PutIndex(ctx, "platform", workflowID, first); err != nil {
+		t.Fatalf("first PutIndex: %v", err)
+	}
+	if err := store.PutIndex(ctx, "platform", workflowID, second); err != nil {
+		t.Fatalf("second PutIndex: %v", err)
+	}
+
+	got, err := store.GetIndex(ctx, "platform", workflowID)
+	if err != nil {
+		t.Fatalf("GetIndex: %v", err)
+	}
+	if len(got) != 2 || got["opsBuddyRef"].Digest != "sha256:zzz" {
+		t.Errorf("GetIndex = %+v, want the second PutIndex's value (overwritten, not merged)", got)
+	}
+}
+
+func TestMinioStore_GetIndex_NotFoundForUnknownWorkflow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.GetIndex(ctx, "platform", "never-existed"); err == nil {
+		t.Error("GetIndex for an unknown workflow ID succeeded, want error")
+	}
+}

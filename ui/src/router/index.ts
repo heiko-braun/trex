@@ -37,6 +37,11 @@ const router = createRouter({
           name: 'agents',
           component: () => import('../views/AgentsListView.vue'),
         },
+        {
+          path: 'envelopes/:workflowId?',
+          name: 'envelopes',
+          component: () => import('../views/EnvelopeBrowserView.vue'),
+        },
       ],
     },
   ],

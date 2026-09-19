@@ -36,11 +36,15 @@ type TokenSource interface {
 }
 
 // BlobStore resolves and stores content-addressed blobs for activities,
-// per docs/architecure/task-envelope-design.md section 9.1. Implemented
-// by *blobstore.MinioStore; abstracted here for testing.
+// per docs/architecure/task-envelope-design.md section 9.1, plus the
+// per-workflow index used by the envelope browser (see
+// specs/task-envelope-browser.md). Implemented by *blobstore.MinioStore;
+// abstracted here for testing.
 type BlobStore interface {
 	Put(ctx context.Context, tenant, mediaType string, content []byte) (manifest.Ref, error)
 	Get(ctx context.Context, tenant string, ref manifest.Ref) ([]byte, error)
+	PutIndex(ctx context.Context, tenant, workflowID string, slots map[string]manifest.Ref) error
+	GetIndex(ctx context.Context, tenant, workflowID string) (map[string]manifest.Ref, error)
 }
 
 // Status reports whether a registered agent's worker is currently

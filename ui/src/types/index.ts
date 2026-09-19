@@ -36,3 +36,14 @@ export interface RegisteredAgent {
   taskQueue: string
   running: boolean
 }
+
+// Mirrors internal/manifest.Ref, as returned by GET /envelopes/{workflowID}.
+export interface EnvelopeRef {
+  MediaType: string
+  Digest: string
+  Size: number
+  Bucket: string
+}
+
+// Slot name -> Ref, the full response shape of GET /envelopes/{workflowID}.
+export type EnvelopeIndex = Record<string, EnvelopeRef>

@@ -9,7 +9,17 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/testsuite"
+
+	"github.com/heiko-braun/trex/internal/manifest"
 )
+
+// fakeBlobStore is an in-memory BlobStore, standing in for
+// *blobstore.MinioStore in tests.
+type fakeBlobStore struct{}
+
+func (fakeBlobStore) PutIndex(_ context.Context, _, _ string, _ map[string]manifest.Ref) error {
+	return nil
+}
 
 // devServer is a single embedded Temporal dev server shared by every
 // test in this package: worker.Start() connects eagerly, so bookkeeping
@@ -71,7 +81,7 @@ do:
 
 func newTestSupervisor(t *testing.T) *Supervisor {
 	t.Helper()
-	return NewSupervisor(devServer.Client())
+	return NewSupervisor(devServer.Client(), fakeBlobStore{})
 }
 
 func TestSupervisor_Register_StartsWorker(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
@@ -38,6 +39,7 @@ type Status struct {
 // (tenant, name) workflow definition.
 type Supervisor struct {
 	client client.Client
+	blobs  BlobStore
 
 	mu      sync.Mutex
 	workers map[key]worker.Worker
@@ -45,10 +47,13 @@ type Supervisor struct {
 }
 
 // NewSupervisor builds a Supervisor that starts workers against the
-// given Temporal client.
-func NewSupervisor(c client.Client) *Supervisor {
+// given Temporal client. Every worker it starts also registers the small
+// fixed set of shared activities (currently just write-envelope-index)
+// available to any workflow YAML, backed by blobs.
+func NewSupervisor(c client.Client, blobs BlobStore) *Supervisor {
 	return &Supervisor{
 		client:  c,
+		blobs:   blobs,
 		workers: map[key]worker.Worker{},
 		queues:  map[key]string{},
 	}
@@ -66,6 +71,9 @@ func (s *Supervisor) Register(tenant, name, taskQueue string, yamlBytes []byte) 
 	s.stopLocked(k)
 
 	w := worker.New(s.client, taskQueue, worker.Options{})
+	w.RegisterActivityWithOptions(writeEnvelopeIndexActivity(s.blobs), activity.RegisterOptions{
+		Name: "write-envelope-index",
+	})
 	if err := zigflowadapter.Build(w, yamlBytes); err != nil {
 		return fmt.Errorf("build workflow %s/%s: %w", tenant, name, err)
 	}

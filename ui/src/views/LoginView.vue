@@ -2,7 +2,7 @@
   <div class="flex min-h-screen items-center justify-center bg-muted">
     <div class="w-full max-w-md space-y-8 rounded-lg border border-border bg-card p-8 shadow-lg">
       <div class="text-center">
-        <h1 class="text-3xl font-bold">Zigflow Workflow Server</h1>
+        <h1 class="text-3xl font-bold">Trex Workflow Server</h1>
         <p class="mt-2 text-muted-foreground">Sign in to view stored workflow definitions</p>
       </div>
 

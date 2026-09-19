@@ -108,7 +108,7 @@ func run() error {
 	}
 	defer agentSupervisor.Stop()
 
-	workflowSupervisor, err := startWorkflowSupervisor(temporalClient, defStore)
+	workflowSupervisor, err := startWorkflowSupervisor(temporalClient, defStore, blobs)
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func run() error {
 		KeycloakRealm:  keycloakRealm,
 		KeycloakClient: keycloakClient,
 		AdminRoles:     adminRoles,
-	}, discoveryClient, agentSupervisor, registrationStore, workflowSupervisor)
+	}, discoveryClient, agentSupervisor, registrationStore, workflowSupervisor, blobs)
 
 	mux := http.NewServeMux()
 	server.Routes(mux)
@@ -163,8 +163,8 @@ func startAgentSupervisor(temporalClient client.Client, managedAgentsURL string,
 // workflow definition, per specs/workflow-worker-supervisor.md: the most
 // recent revision per (tenant, name) becomes runnable again without
 // needing a fresh publish.
-func startWorkflowSupervisor(temporalClient client.Client, defs store.DefinitionStore) (*workflowworker.Supervisor, error) {
-	supervisor := workflowworker.NewSupervisor(temporalClient)
+func startWorkflowSupervisor(temporalClient client.Client, defs store.DefinitionStore, blobs workflowworker.BlobStore) (*workflowworker.Supervisor, error) {
+	supervisor := workflowworker.NewSupervisor(temporalClient, blobs)
 
 	all, err := defs.List(context.Background())
 	if err != nil {

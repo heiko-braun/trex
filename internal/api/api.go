@@ -17,10 +17,16 @@ import (
 	"github.com/heiko-braun/trex/internal/agents"
 	"github.com/heiko-braun/trex/internal/auth"
 	"github.com/heiko-braun/trex/internal/buildid"
+	"github.com/heiko-braun/trex/internal/manifest"
 	"github.com/heiko-braun/trex/internal/validator"
 	"github.com/heiko-braun/trex/internal/worker"
 	"github.com/heiko-braun/trex/store"
 )
+
+// envelopeTenant is hardcoded for this slice, matching
+// internal/worker/activity.go's own hardcoded tenant: no multi-tenant
+// wiring exists yet anywhere in the workflow input or activity input.
+const envelopeTenant = "platform"
 
 // AuthConfig holds the Keycloak settings this server hands back to clients
 // via GET /api/v1/auth/config, and the values used to build the auth
@@ -56,6 +62,14 @@ type WorkflowSupervisor interface {
 	Register(tenant, name, taskQueue string, yamlBytes []byte) error
 }
 
+// EnvelopeStore reads task envelope data written by the
+// write-envelope-index activity, per specs/task-envelope-browser.md.
+// Implemented by *blobstore.MinioStore.
+type EnvelopeStore interface {
+	GetIndex(ctx context.Context, tenant, workflowID string) (map[string]manifest.Ref, error)
+	Get(ctx context.Context, tenant string, ref manifest.Ref) ([]byte, error)
+}
+
 // Server wires the Publish API's HTTP handlers to a definition store.
 type Server struct {
 	store          store.DefinitionStore
@@ -64,13 +78,14 @@ type Server struct {
 	supervisor     AgentSupervisor
 	registrations  store.AgentRegistrationStore
 	workflowWorker WorkflowSupervisor
+	envelopes      EnvelopeStore
 }
 
 // New creates a Server backed by the given definition store, discovery
-// client, agent worker supervisor, agent registration store, and
-// workflow worker supervisor.
-func New(s store.DefinitionStore, authCfg AuthConfig, discoverer AgentDiscoverer, supervisor AgentSupervisor, registrations store.AgentRegistrationStore, workflowWorker WorkflowSupervisor) *Server {
-	return &Server{store: s, auth: authCfg, discoverer: discoverer, supervisor: supervisor, registrations: registrations, workflowWorker: workflowWorker}
+// client, agent worker supervisor, agent registration store, workflow
+// worker supervisor, and envelope store.
+func New(s store.DefinitionStore, authCfg AuthConfig, discoverer AgentDiscoverer, supervisor AgentSupervisor, registrations store.AgentRegistrationStore, workflowWorker WorkflowSupervisor, envelopes EnvelopeStore) *Server {
+	return &Server{store: s, auth: authCfg, discoverer: discoverer, supervisor: supervisor, registrations: registrations, workflowWorker: workflowWorker, envelopes: envelopes}
 }
 
 const authConfigPath = "/api/v1/auth/config"
@@ -86,6 +101,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	protected.HandleFunc("GET /agents/registered", s.handleListRegisteredAgents)
 	protected.HandleFunc("POST /agents/{id}/register", s.handleRegisterAgent)
 	protected.HandleFunc("DELETE /agents/{id}/register", s.handleUnregisterAgent)
+	protected.HandleFunc("GET /envelopes/{workflowID}", s.handleGetEnvelope)
+	protected.HandleFunc("GET /envelopes/{workflowID}/{digest}", s.handleGetEnvelopeBlob)
 
 	middleware := auth.Middleware(auth.MiddlewareConfig{
 		Validator:   s.auth.Validator,
@@ -276,6 +293,65 @@ func (s *Server) handleUnregisterAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetEnvelope returns the slot -> ref index written by the
+// write-envelope-index activity for one workflow execution ID, per
+// specs/task-envelope-browser.md.
+func (s *Server) handleGetEnvelope(w http.ResponseWriter, r *http.Request) {
+	workflowID := r.PathValue("workflowID")
+
+	slots, err := s.envelopes.GetIndex(r.Context(), envelopeTenant, workflowID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no envelope found for workflow "+workflowID)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, slots)
+}
+
+// handleGetEnvelopeBlob returns the raw content of one blob referenced by
+// workflowID's envelope, identified by its digest (e.g.
+// "sha256:44dd..."). The digest must belong to a ref actually listed in
+// that workflow's envelope index — this endpoint does not allow fetching
+// arbitrary digests outside the envelope it was asked about.
+func (s *Server) handleGetEnvelopeBlob(w http.ResponseWriter, r *http.Request) {
+	workflowID := r.PathValue("workflowID")
+	digest := r.PathValue("digest")
+
+	slots, err := s.envelopes.GetIndex(r.Context(), envelopeTenant, workflowID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no envelope found for workflow "+workflowID)
+		return
+	}
+
+	var ref *manifest.Ref
+	for _, slotRef := range slots {
+		if slotRef.Digest == digest {
+			r := slotRef
+			ref = &r
+			break
+		}
+	}
+	if ref == nil {
+		writeError(w, http.StatusNotFound, "digest "+digest+" is not part of workflow "+workflowID+"'s envelope")
+		return
+	}
+
+	content, err := s.envelopes.Get(r.Context(), envelopeTenant, *ref)
+	if err != nil {
+		slog.Error("get envelope blob", "workflow", workflowID, "digest", digest, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	contentType := ref.MediaType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
 }
 
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {

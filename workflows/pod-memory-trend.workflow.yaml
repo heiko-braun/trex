@@ -2,7 +2,7 @@ document:
   dsl: 1.0.0
   taskQueue: pod-memory-trend
   workflowType: pod-memory-trend
-  version: 0.0.2
+  version: 0.0.3
   title: Pod Memory Trend Investigation
   summary: >
     Chains three managed agents sequentially, calling each as a Temporal
@@ -36,6 +36,18 @@ document:
     Revision, purely so formatOutput can produce the workflow's final
     text output without a separate ref-resolution step — every other
     consumer reads the ref, not this field.
+
+    As its last step before formatOutput, the workflow calls
+    write-envelope-index (see specs/task-envelope-browser.md) once, on
+    this workflow's own task queue (pod-memory-trend), passing every
+    current slot ref from $context. This call must stay in the root
+    workflow's own do: list, never inside a pollX for-loop: Zigflow runs
+    each for/while iteration as its own child Temporal workflow (confirmed
+    via `temporal workflow list`), and activity.GetInfo(ctx)'s
+    WorkflowExecution.ID is whichever workflow directly invoked the
+    activity — a call from inside pollEditor would record that child's ID,
+    not this workflow's own, breaking the envelope browser's lookup by
+    root workflow ID.
 
     Data flow otherwise follows Zigflow's documented model — see
     docs/zigflow-syntax-reference.md for the full rules; in short: every
@@ -194,6 +206,19 @@ do:
                   seconds: 15
             export:
               as: '${ $context + { editorDone: .Done, editorFailed: .Failed, editorRef: .Revision.Ref, editorResult: .Result } }'
+
+  - writeEnvelopeIndex:
+      call: activity
+      with:
+        name: write-envelope-index
+        taskQueue: pod-memory-trend
+        arguments:
+          - Tenant: platform
+            Slots: '${ { opsBuddyRef: $context.opsBuddyRef, logMonitoringRef: $context.logMonitoringRef, editorRef: $context.editorRef } }'
+      metadata:
+        activityOptions:
+          startToCloseTimeout:
+            seconds: 15
 
   - formatOutput:
       output:

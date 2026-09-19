@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -18,7 +19,9 @@ import (
 	"github.com/heiko-braun/trex/internal/manifest"
 )
 
-// Store puts and gets content-addressed blobs, scoped per tenant.
+// Store puts and gets content-addressed blobs, scoped per tenant, plus a
+// small per-workflow index (see PutIndex) that makes those blobs
+// discoverable by workflow execution ID.
 type Store interface {
 	// Put uploads content under tenant, keyed by its SHA-256 digest, and
 	// returns a Ref describing it. Uploading the same content twice is
@@ -27,6 +30,18 @@ type Store interface {
 
 	// Get downloads the content described by ref from tenant.
 	Get(ctx context.Context, tenant string, ref manifest.Ref) ([]byte, error)
+
+	// PutIndex writes (overwriting any previous value) the set of slot
+	// refs produced by workflowID, so they can be looked up without
+	// already knowing their digests. Unlike Put, this key is not
+	// content-addressed: it is keyed by workflowID and always
+	// overwritten with the latest state, per
+	// specs/task-envelope-browser.md.
+	PutIndex(ctx context.Context, tenant, workflowID string, slots map[string]manifest.Ref) error
+
+	// GetIndex reads back the slot refs written by PutIndex for
+	// workflowID.
+	GetIndex(ctx context.Context, tenant, workflowID string) (map[string]manifest.Ref, error)
 }
 
 // MinioStore is a Store backed by a Minio (or any S3-compatible) bucket,
@@ -122,4 +137,48 @@ func objectKey(tenant, digest string) string {
 		hash = digest[len(prefix):]
 	}
 	return fmt.Sprintf("%s/sha256/%s", tenant, hash)
+}
+
+// indexKey builds the fixed (non-content-addressed) key holding
+// workflowID's slot index.
+func indexKey(tenant, workflowID string) string {
+	return fmt.Sprintf("%s/by-workflow/%s.json", tenant, workflowID)
+}
+
+// PutIndex implements Store.
+func (s *MinioStore) PutIndex(ctx context.Context, tenant, workflowID string, slots map[string]manifest.Ref) error {
+	body, err := json.Marshal(slots)
+	if err != nil {
+		return fmt.Errorf("marshal index for workflow %q: %w", workflowID, err)
+	}
+
+	key := indexKey(tenant, workflowID)
+	_, err = s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(body), int64(len(body)),
+		minio.PutObjectOptions{ContentType: "application/json"})
+	if err != nil {
+		return fmt.Errorf("put index %q: %w", key, err)
+	}
+	return nil
+}
+
+// GetIndex implements Store.
+func (s *MinioStore) GetIndex(ctx context.Context, tenant, workflowID string) (map[string]manifest.Ref, error) {
+	key := indexKey(tenant, workflowID)
+
+	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get index %q: %w", key, err)
+	}
+	defer obj.Close()
+
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("read index %q: %w", key, err)
+	}
+
+	var slots map[string]manifest.Ref
+	if err := json.Unmarshal(data, &slots); err != nil {
+		return nil, fmt.Errorf("decode index %q: %w", key, err)
+	}
+	return slots, nil
 }

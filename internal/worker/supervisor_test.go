@@ -75,12 +75,30 @@ func (fakeTokenSource) Token(_ context.Context) (string, error) {
 // fakeBlobStore is an in-memory BlobStore, standing in for
 // *blobstore.MinioStore in tests.
 type fakeBlobStore struct {
-	mu   sync.Mutex
-	data map[string][]byte
+	mu      sync.Mutex
+	data    map[string][]byte
+	indexes map[string]map[string]manifest.Ref
 }
 
 func newFakeBlobStore() *fakeBlobStore {
-	return &fakeBlobStore{data: map[string][]byte{}}
+	return &fakeBlobStore{data: map[string][]byte{}, indexes: map[string]map[string]manifest.Ref{}}
+}
+
+func (f *fakeBlobStore) PutIndex(_ context.Context, tenant, workflowID string, slots map[string]manifest.Ref) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.indexes[tenant+"/"+workflowID] = slots
+	return nil
+}
+
+func (f *fakeBlobStore) GetIndex(_ context.Context, tenant, workflowID string) (map[string]manifest.Ref, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	slots, ok := f.indexes[tenant+"/"+workflowID]
+	if !ok {
+		return nil, fmt.Errorf("no such index: %s/%s", tenant, workflowID)
+	}
+	return slots, nil
 }
 
 func (f *fakeBlobStore) Put(_ context.Context, tenant, mediaType string, content []byte) (manifest.Ref, error) {

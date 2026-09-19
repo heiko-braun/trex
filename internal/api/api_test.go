@@ -20,6 +20,7 @@ import (
 
 	"github.com/heiko-braun/trex/internal/agents"
 	"github.com/heiko-braun/trex/internal/auth"
+	"github.com/heiko-braun/trex/internal/manifest"
 	"github.com/heiko-braun/trex/internal/worker"
 	"github.com/heiko-braun/trex/store"
 )
@@ -264,9 +265,41 @@ func (f *fakeWorkflowSupervisor) Register(tenant, name, taskQueue string, _ []by
 	return f.registerErr
 }
 
+// fakeEnvelopeStore is an in-memory EnvelopeStore for testing the
+// envelope endpoints in isolation from Minio.
+type fakeEnvelopeStore struct {
+	mu      sync.Mutex
+	indexes map[string]map[string]manifest.Ref
+	blobs   map[string][]byte
+}
+
+func newFakeEnvelopeStore() *fakeEnvelopeStore {
+	return &fakeEnvelopeStore{indexes: map[string]map[string]manifest.Ref{}, blobs: map[string][]byte{}}
+}
+
+func (f *fakeEnvelopeStore) GetIndex(_ context.Context, tenant, workflowID string) (map[string]manifest.Ref, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	slots, ok := f.indexes[tenant+"/"+workflowID]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return slots, nil
+}
+
+func (f *fakeEnvelopeStore) Get(_ context.Context, tenant string, ref manifest.Ref) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	content, ok := f.blobs[tenant+"/"+ref.Digest]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return content, nil
+}
+
 func newTestServer(t *testing.T) (*Server, *http.ServeMux, func() string) {
 	v, mintToken := testAuth(t)
-	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), &fakeWorkflowSupervisor{})
+	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), &fakeWorkflowSupervisor{}, newFakeEnvelopeStore())
 	mux := http.NewServeMux()
 	s.Routes(mux)
 	return s, mux, mintToken
@@ -316,7 +349,7 @@ func TestPublish_ValidWorkflow(t *testing.T) {
 func TestPublish_StartsWorkflowWorker(t *testing.T) {
 	v, mintToken := testAuth(t)
 	wfSupervisor := &fakeWorkflowSupervisor{}
-	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), wfSupervisor)
+	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), wfSupervisor, newFakeEnvelopeStore())
 	mux := http.NewServeMux()
 	s.Routes(mux)
 
@@ -339,7 +372,7 @@ func TestPublish_StartsWorkflowWorker(t *testing.T) {
 func TestPublish_WorkflowWorkerStartFailureIsSurfaced(t *testing.T) {
 	v, mintToken := testAuth(t)
 	wfSupervisor := &fakeWorkflowSupervisor{registerErr: errors.New("temporal unreachable")}
-	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), wfSupervisor)
+	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), wfSupervisor, newFakeEnvelopeStore())
 	mux := http.NewServeMux()
 	s.Routes(mux)
 
@@ -491,7 +524,7 @@ func TestList_RejectsMissingToken(t *testing.T) {
 func TestDiscoverAgents_ForwardsCallersToken(t *testing.T) {
 	v, mintToken := testAuth(t)
 	discoverer := &fakeDiscoverer{result: []agents.Agent{{ID: "a1", Name: "agent-one", Type: "coding"}}}
-	s := New(&fakeStore{}, AuthConfig{Validator: v}, discoverer, newFakeSupervisor(), newFakeRegistrationStore(), &fakeWorkflowSupervisor{})
+	s := New(&fakeStore{}, AuthConfig{Validator: v}, discoverer, newFakeSupervisor(), newFakeRegistrationStore(), &fakeWorkflowSupervisor{}, newFakeEnvelopeStore())
 	mux := http.NewServeMux()
 	s.Routes(mux)
 
@@ -519,7 +552,7 @@ func TestDiscoverAgents_ForwardsCallersToken(t *testing.T) {
 func TestDiscoverAgents_PropagatesControlPlaneError(t *testing.T) {
 	v, mintToken := testAuth(t)
 	discoverer := &fakeDiscoverer{err: errors.New("control plane unreachable")}
-	s := New(&fakeStore{}, AuthConfig{Validator: v}, discoverer, newFakeSupervisor(), newFakeRegistrationStore(), &fakeWorkflowSupervisor{})
+	s := New(&fakeStore{}, AuthConfig{Validator: v}, discoverer, newFakeSupervisor(), newFakeRegistrationStore(), &fakeWorkflowSupervisor{}, newFakeEnvelopeStore())
 	mux := http.NewServeMux()
 	s.Routes(mux)
 
@@ -649,7 +682,7 @@ func TestListRegisteredAgents_RejectsMissingToken(t *testing.T) {
 func TestPublish_SurvivesPanicInWorkflowSupervisor(t *testing.T) {
 	v, mintToken := testAuth(t)
 	wfSupervisor := &fakeWorkflowSupervisor{panicRegister: true}
-	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), wfSupervisor)
+	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), wfSupervisor, newFakeEnvelopeStore())
 	mux := http.NewServeMux()
 	s.Routes(mux)
 
@@ -673,4 +706,116 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+func newTestServerWithEnvelopes(t *testing.T, envelopes *fakeEnvelopeStore) (*http.ServeMux, func() string) {
+	t.Helper()
+	v, mintToken := testAuth(t)
+	s := New(&fakeStore{}, AuthConfig{Validator: v}, &fakeDiscoverer{}, newFakeSupervisor(), newFakeRegistrationStore(), &fakeWorkflowSupervisor{}, envelopes)
+	mux := http.NewServeMux()
+	s.Routes(mux)
+	return mux, mintToken
+}
+
+func TestGetEnvelope_ReturnsSlotIndex(t *testing.T) {
+	envelopes := newFakeEnvelopeStore()
+	envelopes.indexes["platform/wf-1"] = map[string]manifest.Ref{
+		"opsBuddyRef": {Digest: "sha256:aaa", Size: 3, MediaType: "text/plain"},
+	}
+	mux, mintToken := newTestServerWithEnvelopes(t, envelopes)
+
+	req := httptest.NewRequest(http.MethodGet, "/envelopes/wf-1", nil)
+	req.Header.Set("Authorization", "Bearer "+mintToken())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp map[string]manifest.Ref
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["opsBuddyRef"].Digest != "sha256:aaa" {
+		t.Errorf("resp = %+v, want opsBuddyRef digest sha256:aaa", resp)
+	}
+}
+
+func TestGetEnvelope_NotFoundForUnknownWorkflow(t *testing.T) {
+	mux, mintToken := newTestServerWithEnvelopes(t, newFakeEnvelopeStore())
+
+	req := httptest.NewRequest(http.MethodGet, "/envelopes/never-existed", nil)
+	req.Header.Set("Authorization", "Bearer "+mintToken())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestGetEnvelope_RejectsMissingToken(t *testing.T) {
+	mux, _ := newTestServerWithEnvelopes(t, newFakeEnvelopeStore())
+
+	req := httptest.NewRequest(http.MethodGet, "/envelopes/wf-1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestGetEnvelopeBlob_ReturnsContent(t *testing.T) {
+	envelopes := newFakeEnvelopeStore()
+	envelopes.indexes["platform/wf-1"] = map[string]manifest.Ref{
+		"opsBuddyRef": {Digest: "sha256:aaa", Size: 5, MediaType: "text/plain"},
+	}
+	envelopes.blobs["platform/sha256:aaa"] = []byte("hello")
+	mux, mintToken := newTestServerWithEnvelopes(t, envelopes)
+
+	req := httptest.NewRequest(http.MethodGet, "/envelopes/wf-1/sha256:aaa", nil)
+	req.Header.Set("Authorization", "Bearer "+mintToken())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if rec.Body.String() != "hello" {
+		t.Errorf("body = %q, want %q", rec.Body.String(), "hello")
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/plain" {
+		t.Errorf("Content-Type = %q, want %q", ct, "text/plain")
+	}
+}
+
+func TestGetEnvelopeBlob_NotFoundForDigestOutsideEnvelope(t *testing.T) {
+	envelopes := newFakeEnvelopeStore()
+	envelopes.indexes["platform/wf-1"] = map[string]manifest.Ref{
+		"opsBuddyRef": {Digest: "sha256:aaa"},
+	}
+	envelopes.blobs["platform/sha256:zzz"] = []byte("not part of this workflow's envelope")
+	mux, mintToken := newTestServerWithEnvelopes(t, envelopes)
+
+	req := httptest.NewRequest(http.MethodGet, "/envelopes/wf-1/sha256:zzz", nil)
+	req.Header.Set("Authorization", "Bearer "+mintToken())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+}
+
+func TestGetEnvelopeBlob_RejectsMissingToken(t *testing.T) {
+	mux, _ := newTestServerWithEnvelopes(t, newFakeEnvelopeStore())
+
+	req := httptest.NewRequest(http.MethodGet, "/envelopes/wf-1/sha256:aaa", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
 }
