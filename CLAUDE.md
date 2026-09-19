@@ -32,7 +32,16 @@ start (no Temporal/Postgres).
    ```bash
    make db
    ```
-3. **Workflow server** (hosts Zigflow workers + the agent registration API):
+3. **Minio** (Minio-backed object store for task-envelope refs — see
+   docs/architecure/task-envelope-design.md and
+   specs/task-envelopes-minimal-slice.md; every `invoke-agent`/
+   `poll-agent-task` activity call resolves/stores content here):
+   ```bash
+   make minio
+   # Minio API:     http://localhost:9000
+   # Minio Console: http://localhost:9001
+   ```
+4. **Workflow server** (hosts Zigflow workers + the agent registration API):
    ```bash
    make run
    ```
@@ -40,7 +49,7 @@ start (no Temporal/Postgres).
    specs/agent-discovery-and-registration.md. Discovery
    (`GET /agents`) and registration (`POST /agents/{id}/register`) both
    run under the caller's own token, forwarded per request.
-4. **Register the agents the new workflow will call**, one Temporal
+5. **Register the agents the new workflow will call**, one Temporal
    worker per agent (task queue `agent-<id>`), *before* running the
    workflow — a workflow started against an unregistered agent's task
    queue just sits at `schedule-to-start` timeout, waiting for a poller
@@ -55,9 +64,27 @@ start (no Temporal/Postgres).
    **Pollers** (a poller listed there is the workflow-server's worker for
    that agent; nothing shows under **Workflows** until an execution
    actually calls it).
-5. **Now** author/run the workflow YAML with `zigflow run` — its
-   `call: activity, name: invoke-agent` steps route to whichever agents
-   were registered in step 4.
+6. **Publish the workflow YAML to the workflow-server**, then start an
+   execution against it — do NOT use `zigflow run` to execute workflows in
+   this project. `zigflow run` starts its own ad hoc worker outside the
+   workflow-server, which either can't reach the registered agent workers
+   at all or competes with the workflow-server's own worker on the same
+   task queue, producing confusing, nondeterministic routing. The
+   workflow-server is the only thing that should be running a worker for
+   a published definition (see `internal/workflowworker.Supervisor` /
+   specs/workflow-worker-supervisor.md). `zigflow validate` remains fine
+   to use standalone for a pre-publish syntax/policy check.
+
+   ```bash
+   # publish (see .claude/skills/create-workflow/SKILL.md step 6, or scripts/workflow-server-token.sh)
+   TOK=$(./scripts/workflow-server-token.sh)
+   curl -s -X POST -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+     --data-binary @publish.json http://localhost:8080/definitions
+
+   # execute (see .claude/skills/run-workflow/SKILL.md)
+   temporal workflow start --task-queue <name> --type <name> \
+     --workflow-id "<name>-$(date +%s)" --input '<json>'
+   ```
 
 To unregister an agent later: `curl -X DELETE -H "Authorization: Bearer ..." http://localhost:8080/agents/<agent-id>/register`.
 

@@ -18,6 +18,7 @@ import (
 	"github.com/heiko-braun/trex/internal/agents"
 	"github.com/heiko-braun/trex/internal/api"
 	"github.com/heiko-braun/trex/internal/auth"
+	"github.com/heiko-braun/trex/internal/blobstore"
 	"github.com/heiko-braun/trex/internal/worker"
 	"github.com/heiko-braun/trex/internal/workflowworker"
 	"github.com/heiko-braun/trex/store"
@@ -54,6 +55,17 @@ func run() error {
 		return fmt.Errorf("MANAGED_AGENTS_API_URL environment variable is required")
 	}
 
+	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
+	if minioEndpoint == "" {
+		return fmt.Errorf("MINIO_ENDPOINT environment variable is required")
+	}
+	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
+	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
+	minioBucket := os.Getenv("MINIO_BUCKET")
+	if minioBucket == "" {
+		return fmt.Errorf("MINIO_BUCKET environment variable is required")
+	}
+
 	if err := postgres.RunMigrations(dbURL); err != nil {
 		return err
 	}
@@ -80,7 +92,17 @@ func run() error {
 	}
 	defer temporalClient.Close()
 
-	agentSupervisor, err := startAgentSupervisor(temporalClient, managedAgentsURL, registrationStore)
+	blobs, err := blobstore.NewMinioStore(context.Background(), blobstore.Config{
+		Endpoint:  minioEndpoint,
+		AccessKey: minioAccessKey,
+		SecretKey: minioSecretKey,
+		Bucket:    minioBucket,
+	})
+	if err != nil {
+		return fmt.Errorf("connect to minio: %w", err)
+	}
+
+	agentSupervisor, err := startAgentSupervisor(temporalClient, managedAgentsURL, registrationStore, blobs)
 	if err != nil {
 		return err
 	}
@@ -113,13 +135,13 @@ func run() error {
 // registration, per specs/agent-discovery-and-registration.md:
 // registration state survives restarts without needing a fresh
 // discovery call.
-func startAgentSupervisor(temporalClient client.Client, managedAgentsURL string, registrations store.AgentRegistrationStore) (*worker.Supervisor, error) {
+func startAgentSupervisor(temporalClient client.Client, managedAgentsURL string, registrations store.AgentRegistrationStore, blobs worker.BlobStore) (*worker.Supervisor, error) {
 	dispatcher := agents.NewDispatcher(managedAgentsURL)
 	tokens, err := agents.NewAgentctlTokenSource()
 	if err != nil {
 		return nil, fmt.Errorf("build token source: %w", err)
 	}
-	supervisor := worker.NewSupervisor(temporalClient, dispatcher, tokens)
+	supervisor := worker.NewSupervisor(temporalClient, dispatcher, tokens, blobs)
 
 	regs, err := registrations.List(context.Background())
 	if err != nil {

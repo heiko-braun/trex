@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/heiko-braun/trex/internal/agents"
+	"github.com/heiko-braun/trex/internal/manifest"
 )
 
 // devServer is a single embedded Temporal dev server shared by every test
@@ -70,9 +72,38 @@ func (fakeTokenSource) Token(_ context.Context) (string, error) {
 	return "fake-token", nil
 }
 
+// fakeBlobStore is an in-memory BlobStore, standing in for
+// *blobstore.MinioStore in tests.
+type fakeBlobStore struct {
+	mu   sync.Mutex
+	data map[string][]byte
+}
+
+func newFakeBlobStore() *fakeBlobStore {
+	return &fakeBlobStore{data: map[string][]byte{}}
+}
+
+func (f *fakeBlobStore) Put(_ context.Context, tenant, mediaType string, content []byte) (manifest.Ref, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	digest := fmt.Sprintf("sha256:fake-%d", len(f.data))
+	f.data[tenant+"/"+digest] = content
+	return manifest.Ref{MediaType: mediaType, Digest: digest, Size: int64(len(content))}, nil
+}
+
+func (f *fakeBlobStore) Get(_ context.Context, tenant string, ref manifest.Ref) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	content, ok := f.data[tenant+"/"+ref.Digest]
+	if !ok {
+		return nil, fmt.Errorf("no such blob: %s/%s", tenant, ref.Digest)
+	}
+	return content, nil
+}
+
 func newTestSupervisor(t *testing.T) *Supervisor {
 	t.Helper()
-	return NewSupervisor(devServer.Client(), &fakeDispatcher{}, fakeTokenSource{})
+	return NewSupervisor(devServer.Client(), &fakeDispatcher{}, fakeTokenSource{}, newFakeBlobStore())
 }
 
 func TestSupervisor_Register_StartsWorker(t *testing.T) {

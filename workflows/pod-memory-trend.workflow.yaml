@@ -2,7 +2,7 @@ document:
   dsl: 1.0.0
   taskQueue: pod-memory-trend
   workflowType: pod-memory-trend
-  version: 0.0.1
+  version: 0.0.2
   title: Pod Memory Trend Investigation
   summary: >
     Chains three managed agents sequentially, calling each as a Temporal
@@ -19,7 +19,25 @@ document:
     internal/agents.AgentctlTokenSource) instead of one being passed in
     as workflow input, so no token needs to outlive any single call. See
     specs/async-agent-dispatch.md.
-    Data flow follows Zigflow's documented model — see
+
+    Data passing follows docs/architecure/task-envelope-design.md
+    (minimal slice, see specs/task-envelopes-minimal-slice.md): $context
+    carries manifest.Ref structs per slot (opsBuddyRef, logMonitoringRef,
+    editorRef) rather than raw result strings. Every invoke-agent /
+    poll-agent-task call passes `Reads` (a map of slot name -> Ref the
+    activity should resolve from the Minio-backed blobstore) and an
+    `Instruction` template with `{{slot}}` placeholders — the activity
+    itself fetches ref content and substitutes it into the instruction,
+    so the workflow only ever moves small refs, never raw agent output.
+    On completion each activity uploads its result to blobstore and
+    returns a `Revision` (Ref + ProducedBy + Reason), which the workflow
+    appends into $context as the new slot ref. Editor's activity also
+    returns the same content as plain `Result` text alongside its
+    Revision, purely so formatOutput can produce the workflow's final
+    text output without a separate ref-resolution step — every other
+    consumer reads the ref, not this field.
+
+    Data flow otherwise follows Zigflow's documented model — see
     docs/zigflow-syntax-reference.md for the full rules; in short: every
     export.as merges via `$context + {...}` rather than replacing it, and
     each `for` loop needs both a nested export.as inside `do:` (feeds
@@ -48,7 +66,8 @@ do:
         name: invoke-agent
         taskQueue: agent-common-texture-7097
         arguments:
-          - Input: ${ "Find the latest memory trend for pod " + $input.podName + " in namespace " + $input.namespace + ". Report the trend and any notable timestamps (e.g. spikes)." }
+          - Reads: {}
+            Instruction: ${ "Find the latest memory trend for pod " + $input.podName + " in namespace " + $input.namespace + ". Report the trend and any notable timestamps (e.g. spikes)." }
       metadata:
         activityOptions:
           startToCloseTimeout:
@@ -56,7 +75,7 @@ do:
           scheduleToCloseTimeout:
             minutes: 3
       export:
-        as: '${ $context + { opsBuddyDone: .Done, opsBuddyResult: .Result, opsBuddyTaskID: .TaskID } }'
+        as: '${ $context + { opsBuddyDone: .Done, opsBuddyRef: .Revision.Ref, opsBuddyTaskID: .TaskID } }'
 
   - pollOpsBuddy:
       for:
@@ -65,7 +84,7 @@ do:
         at: index
       while: ${ ($context.opsBuddyDone // false) == false and $data.index < 59 }
       export:
-        as: '${ $context + { opsBuddyDone: (.[-1].Done // $context.opsBuddyDone), opsBuddyFailed: (.[-1].Failed // false), opsBuddyResult: (.[-1].Result // $context.opsBuddyResult) } }'
+        as: '${ $context + { opsBuddyDone: (.[-1].Done // $context.opsBuddyDone), opsBuddyFailed: (.[-1].Failed // false), opsBuddyRef: (.[-1].Revision.Ref // $context.opsBuddyRef) } }'
       do:
         - cooldown:
             wait:
@@ -77,12 +96,14 @@ do:
               taskQueue: agent-common-texture-7097
               arguments:
                 - TaskID: ${ $context.opsBuddyTaskID }
+                  ProducedBy: poll-agent-task
+                  Reason: initial
             metadata:
               activityOptions:
                 startToCloseTimeout:
                   seconds: 15
             export:
-              as: '${ $context + { opsBuddyDone: .Done, opsBuddyFailed: .Failed, opsBuddyResult: .Result } }'
+              as: '${ $context + { opsBuddyDone: .Done, opsBuddyFailed: .Failed, opsBuddyRef: .Revision.Ref } }'
 
   - askLogMonitoring:
       call: activity
@@ -90,7 +111,8 @@ do:
         name: invoke-agent
         taskQueue: agent-pure-degree-6613
         arguments:
-          - Input: "${ \"Search OpenSearch for logs from pod \" + $input.podName + \" in namespace \" + $input.namespace + \" that correlate with this memory trend: \" + $context.opsBuddyResult + \". Report any errors, warnings, or events around that time.\" }"
+          - Reads: '${ { opsBuddyResult: $context.opsBuddyRef } }'
+            Instruction: '${ "Search OpenSearch for logs from pod " + $input.podName + " in namespace " + $input.namespace + " that correlate with this memory trend: {{opsBuddyResult}}. Report any errors, warnings, or events around that time." }'
       metadata:
         activityOptions:
           startToCloseTimeout:
@@ -98,7 +120,7 @@ do:
           scheduleToCloseTimeout:
             minutes: 3
       export:
-        as: '${ $context + { logMonitoringDone: .Done, logMonitoringResult: .Result, logMonitoringTaskID: .TaskID } }'
+        as: '${ $context + { logMonitoringDone: .Done, logMonitoringRef: .Revision.Ref, logMonitoringTaskID: .TaskID } }'
 
   - pollLogMonitoring:
       for:
@@ -107,7 +129,7 @@ do:
         at: index
       while: ${ ($context.logMonitoringDone // false) == false and $data.index < 59 }
       export:
-        as: '${ $context + { logMonitoringDone: (.[-1].Done // $context.logMonitoringDone), logMonitoringFailed: (.[-1].Failed // false), logMonitoringResult: (.[-1].Result // $context.logMonitoringResult) } }'
+        as: '${ $context + { logMonitoringDone: (.[-1].Done // $context.logMonitoringDone), logMonitoringFailed: (.[-1].Failed // false), logMonitoringRef: (.[-1].Revision.Ref // $context.logMonitoringRef) } }'
       do:
         - cooldown:
             wait:
@@ -119,12 +141,14 @@ do:
               taskQueue: agent-pure-degree-6613
               arguments:
                 - TaskID: ${ $context.logMonitoringTaskID }
+                  ProducedBy: poll-agent-task
+                  Reason: initial
             metadata:
               activityOptions:
                 startToCloseTimeout:
                   seconds: 15
             export:
-              as: '${ $context + { logMonitoringDone: .Done, logMonitoringFailed: .Failed, logMonitoringResult: .Result } }'
+              as: '${ $context + { logMonitoringDone: .Done, logMonitoringFailed: .Failed, logMonitoringRef: .Revision.Ref } }'
 
   - askEditor:
       call: activity
@@ -132,7 +156,8 @@ do:
         name: invoke-agent
         taskQueue: agent-uncovered-bridge-6836
         arguments:
-          - Input: "${ \"Refine and summarize the following investigation into a single, clear response.\\n\\nMemory trend findings:\\n\" + $context.opsBuddyResult + \"\\n\\nCorrelated log findings:\\n\" + $context.logMonitoringResult }"
+          - Reads: '${ { plan: $context.opsBuddyRef, review: $context.logMonitoringRef } }'
+            Instruction: "Refine and summarize the following investigation into a single, clear response.\n\nMemory trend findings:\n{{plan}}\n\nCorrelated log findings:\n{{review}}"
       metadata:
         activityOptions:
           startToCloseTimeout:
@@ -140,7 +165,7 @@ do:
           scheduleToCloseTimeout:
             minutes: 3
       export:
-        as: '${ $context + { editorDone: .Done, editorResult: .Result, editorTaskID: .TaskID } }'
+        as: '${ $context + { editorDone: .Done, editorRef: .Revision.Ref, editorResult: .Result, editorTaskID: .TaskID } }'
 
   - pollEditor:
       for:
@@ -149,7 +174,7 @@ do:
         at: index
       while: ${ ($context.editorDone // false) == false and $data.index < 59 }
       export:
-        as: '${ $context + { editorDone: (.[-1].Done // $context.editorDone), editorFailed: (.[-1].Failed // false), editorResult: (.[-1].Result // $context.editorResult) } }'
+        as: '${ $context + { editorDone: (.[-1].Done // $context.editorDone), editorFailed: (.[-1].Failed // false), editorRef: (.[-1].Revision.Ref // $context.editorRef), editorResult: (.[-1].Result // $context.editorResult) } }'
       do:
         - cooldown:
             wait:
@@ -161,12 +186,14 @@ do:
               taskQueue: agent-uncovered-bridge-6836
               arguments:
                 - TaskID: ${ $context.editorTaskID }
+                  ProducedBy: poll-agent-task
+                  Reason: initial
             metadata:
               activityOptions:
                 startToCloseTimeout:
                   seconds: 15
             export:
-              as: '${ $context + { editorDone: .Done, editorFailed: .Failed, editorResult: .Result } }'
+              as: '${ $context + { editorDone: .Done, editorFailed: .Failed, editorRef: .Revision.Ref, editorResult: .Result } }'
 
   - formatOutput:
       output:

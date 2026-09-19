@@ -15,6 +15,7 @@ import (
 	"go.temporal.io/sdk/worker"
 
 	"github.com/heiko-braun/trex/internal/agents"
+	"github.com/heiko-braun/trex/internal/manifest"
 )
 
 // Dispatcher sends messages to agents via A2A and checks on their task
@@ -34,6 +35,14 @@ type TokenSource interface {
 	Token(ctx context.Context) (string, error)
 }
 
+// BlobStore resolves and stores content-addressed blobs for activities,
+// per docs/architecure/task-envelope-design.md section 9.1. Implemented
+// by *blobstore.MinioStore; abstracted here for testing.
+type BlobStore interface {
+	Put(ctx context.Context, tenant, mediaType string, content []byte) (manifest.Ref, error)
+	Get(ctx context.Context, tenant string, ref manifest.Ref) ([]byte, error)
+}
+
 // Status reports whether a registered agent's worker is currently
 // running, for the read-only registration list.
 type Status struct {
@@ -51,6 +60,7 @@ type Supervisor struct {
 	client     client.Client
 	dispatcher Dispatcher
 	tokens     TokenSource
+	blobs      BlobStore
 
 	mu      sync.Mutex
 	workers map[string]worker.Worker
@@ -58,13 +68,15 @@ type Supervisor struct {
 }
 
 // NewSupervisor builds a Supervisor that starts workers against the given
-// Temporal client, dispatching activity calls through dispatcher and
-// fetching a fresh token from tokens right before each call.
-func NewSupervisor(c client.Client, dispatcher Dispatcher, tokens TokenSource) *Supervisor {
+// Temporal client, dispatching activity calls through dispatcher,
+// fetching a fresh token from tokens right before each call, and
+// resolving/storing agent input and results through blobs.
+func NewSupervisor(c client.Client, dispatcher Dispatcher, tokens TokenSource, blobs BlobStore) *Supervisor {
 	return &Supervisor{
 		client:     c,
 		dispatcher: dispatcher,
 		tokens:     tokens,
+		blobs:      blobs,
 		workers:    map[string]worker.Worker{},
 		known:      map[string]agents.Agent{},
 	}
