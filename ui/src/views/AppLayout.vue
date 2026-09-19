@@ -1,7 +1,10 @@
 <template>
   <div class="flex h-screen bg-background text-foreground">
     <aside class="w-56 shrink-0 border-r border-sidebar-border bg-sidebar p-4">
-      <h2 class="mb-4 px-2 text-sm font-semibold text-muted-foreground">Trex Workflow Server</h2>
+      <h2 class="mb-4 flex items-center gap-2 px-2 text-sm font-semibold text-muted-foreground">
+        <img src="/favicon.svg" alt="" width="20" height="20" class="shrink-0" />
+        Trex Workflow Server
+      </h2>
       <nav class="space-y-1">
         <RouterLink
           to="/definitions"

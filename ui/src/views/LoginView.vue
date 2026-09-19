@@ -2,6 +2,7 @@
   <div class="flex min-h-screen items-center justify-center bg-muted">
     <div class="w-full max-w-md space-y-8 rounded-lg border border-border bg-card p-8 shadow-lg">
       <div class="text-center">
+        <img src="/favicon.svg" alt="" width="40" height="40" class="mx-auto mb-3" />
         <h1 class="text-3xl font-bold">Trex Workflow Server</h1>
         <p class="mt-2 text-muted-foreground">Sign in to view stored workflow definitions</p>
       </div>
